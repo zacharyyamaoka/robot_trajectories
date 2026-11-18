@@ -1,0 +1,29 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "robot-trajectories-ruckig"
+version = "0.1.0"
+description = "Ruckig Community as a robot_trajectories time law ('ruckig'): one jerk-limited S-curve leg between two states, never intermediate waypoints."
+authors = [{ name = "Zach Yamaoka" }]
+requires-python = ">=3.11"
+# WHY ruckig from PyPI, pinned: the Community edition (MIT). It is only ever handed one leg (two points): Community computes
+# intermediate waypoints on Ruckig's cloud servers, so this package refuses them (robot_trajectories PEP 0002 §6).
+# WHY never installed beside robot-trajectories-ruckig-pro: both distributions own the `ruckig` module and both register the
+# time law `ruckig`; install exactly one of the two (the backend refuses to load beside the `ruckig-pro` distribution).
+dependencies = ["robot-trajectories>=0.1.0", "ruckig==0.19.4", "numpy>=1.26"]
+
+[project.entry-points."robot_trajectories.time_laws"]
+ruckig = "robot_trajectories_ruckig:RuckigBackend"
+
+[tool.uv.sources]
+# WHY absolute: the core's own convention (its pyproject names robot-msgs the same way).
+robot-trajectories = { path = "/home/bam/robot_trajectories", editable = true }
+robot-msgs = { path = "/home/bam/robot_msgs", editable = true }
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/robot_trajectories_ruckig"]
+
+[tool.ruff]
+line-length = 130
