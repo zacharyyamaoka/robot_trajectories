@@ -22,6 +22,9 @@ under the entry-point group ``robot_trajectories.time_laws`` (``plugins.py``; ``
 ``robot_trajectories.optimizers`` are reserved for the later roles). Every backend hands back a robot_msgs JointTrajectory,
 so whatever it speaks inside (Ruckig's InputParameter, TOPP-RA's spline), what comes out plays with everything else here.
 
+The space's dynamics reach a backend that names ``dynamics_model`` in its ``needs`` (TOPP-RA's torque-limited mode): callers
+hand ``dynamics=space.dynamics`` to ``leg`` / ``along``; without one the call is a ``MissingRung``. The built-in laws never read it.
+
 Boundary states: a leg starts and ends at rest unless a start or end state (velocity, acceleration) is given. Minimum-jerk
 then solves the quintic through both states (the minimum-jerk solution with those boundary conditions); trapezoid refuses
 by name; a backend takes them as ``start_state`` / ``end_state``. That is what a velocity-matched sync (a moving target)
@@ -44,6 +47,7 @@ import numpy as np
 from robot_msgs.trajectory import JointLimits, JointTrajectory
 
 from . import kernels as k
+from .space import MissingRung
 
 BUILT_IN = ("minimum_jerk", "trapezoid")
 # The catalog's timing rows a plugin backend serves (lane E), named so a missing one is refused with the fix.
@@ -82,13 +86,27 @@ class TimeLawBackend(Protocol):
 
     Optional: ``can_service(path_points, limits, law, start_state, end_state) -> str`` returns "" when it can, else why not
     (MoveIt's canServiceRequest): a Ruckig Community backend returns a refusal for more than two points (they would go to
-    Ruckig's cloud); ``needs``, a tuple in the catalog's needs vocabulary (TOPP-RA's torque mode: dynamics_model,
-    torque_limits). The kind that called it guards the result anyway (limits, jumps, rest, collisions)."""
+    Ruckig's cloud). ``needs``: a tuple in the catalog's needs vocabulary, or a method ``needs(law)`` returning one when they
+    depend on the law (TOPP-RA: ``dynamics_model`` and ``torque_limits`` in its torque-limited mode only).
+
+    **The space's dynamics** (``needs`` naming ``dynamics_model``): the caller hands ``dynamics=space.dynamics`` to
+    ``TimeLaw.leg`` / ``TimeLaw.along`` (``legs_through``, ``cartesian.follow`` and the path kinds do), and the backend is
+    called with ``time_parameterize(..., dynamics=model)``: the model as injected (``torque(q, qd, qdd)``, or pin_utils'
+    ``inverse_dynamics``). No model, or ``torque_limits`` named and no finite ``max_effort``: ``MissingRung``, before the backend
+    runs. The torque bound is the ``max_effort`` already in ``limits``; the caller then holds the model's torque along the
+    result to it. A backend that does not name ``dynamics_model`` is never handed a model (its signature needs no ``dynamics``).
+    The kind that called it guards the result anyway (limits, jumps, rest, collisions)."""
 
     name: str
 
     def time_parameterize(self, path_points: np.ndarray, limits: JointLimits, rate_hz: float, law: TimeLaw, *,
                           start_state: BoundaryState | None = None, end_state: BoundaryState | None = None) -> JointTrajectory: ...
+
+
+def backend_needs(serving: Any, law: TimeLaw) -> tuple[str, ...]:
+    """What a backend needs for this law: its ``needs`` tuple, or what its ``needs(law)`` method returns (none when absent)."""
+    needs = getattr(serving, "needs", ())
+    return tuple(needs(law) if callable(needs) else needs)
 
 
 @dataclass(frozen=True)
@@ -284,9 +302,10 @@ class TimeLaw:
     # ------------------------------------------------------------------ one leg, and a path
 
     def leg(self, q0: np.ndarray, q1: np.ndarray, limits: Any, rate_hz: float, *, label: str = "move",
-            start_state: BoundaryState | None = None, end_state: BoundaryState | None = None) -> k.Arrays:
+            start_state: BoundaryState | None = None, end_state: BoundaryState | None = None, dynamics: Any = None) -> k.Arrays:
         """One leg q0 -> q1 under this law, at rest at both ends unless ``start_state`` / ``end_state`` say otherwise.
-        ``limits``: the space's JointLimits (or kernels.Bounds)."""
+        ``limits``: the space's JointLimits (or kernels.Bounds). ``dynamics``: the space's model (``space.dynamics``), handed to
+        a backend that needs it (TOPP-RA's torque mode); the built-in laws never read it."""
         q0, q1 = np.asarray(q0, float), np.asarray(q1, float)
         moving = not (_at_rest(start_state) and _at_rest(end_state))
         if moving and self.shape == "minimum_jerk":
@@ -302,7 +321,7 @@ class TimeLaw:
             t, s, ds, dds = self._sampled(timing.duration_s, rate_hz)
             delta = (q1 - q0)[None, :]
             return k.Arrays(t, q0 + delta * s[:, None], delta * ds[:, None], delta * dds[:, None], label)
-        timed = self._by_backend(np.stack([q0, q1]), limits, rate_hz, label, start_state, end_state)
+        timed = self._by_backend(np.stack([q0, q1]), limits, rate_hz, label, start_state, end_state, dynamics)
         return timed.arrays
 
     def _quintic(self, q0: np.ndarray, q1: np.ndarray, limits: Any, rate_hz: float, label: str,
@@ -332,8 +351,9 @@ class TimeLaw:
                          "between those boundary states fits inside the limits; lower the boundary speeds or move the point")
 
     def along(self, path: np.ndarray, limits: Any, rate_hz: float, *, label: str = "path",
-              progress_grid: np.ndarray | None = None) -> Timed:
+              progress_grid: np.ndarray | None = None, dynamics: Any = None) -> Timed:
         """A dense joint path (M, J), followed from its first point to its last at rest at both ends under this law.
+        ``dynamics``: the space's model, handed to a backend that needs it (as ``leg``).
 
         Built-in shapes: the path is q(s) on ``progress_grid`` (default uniform 0..1); its derivatives set the duration (every
         joint inside its velocity and acceleration limits, 1 % kept for interpolation), positions are cubic Hermite in s,
@@ -342,7 +362,7 @@ class TimeLaw:
         if path.ndim != 2 or len(path) < 2:
             raise ValueError(f"a path is (M, J) with M >= 2 points, got shape {path.shape}")
         if not self.built_in:
-            return self._by_backend(path, limits, rate_hz, label, None, None)
+            return self._by_backend(path, limits, rate_hz, label, None, None, dynamics)
         grid = np.linspace(0.0, 1.0, len(path)) if progress_grid is None else np.asarray(progress_grid, float)
         if len(path) == 2:
             slope = np.tile(path[1] - path[0], (2, 1))
@@ -373,15 +393,25 @@ class TimeLaw:
         return t, s, ds / total, dds / total**2
 
     def _by_backend(self, path: np.ndarray, limits: Any, rate_hz: float, label: str, start_state: BoundaryState | None,
-                    end_state: BoundaryState | None) -> Timed:
+                    end_state: BoundaryState | None, dynamics: Any = None) -> Timed:
         joint_limits = _joint_limits(limits)
         if self.peak_speed_fraction is not None:
             joint_limits = joint_limits.replace(max_velocity=joint_limits.max_velocity * self.peak_speed_fraction)
         serving = backend(self.shape)
+        needs = backend_needs(serving, self)
+        handed: dict[str, Any] = {}
+        if "dynamics_model" in needs:
+            if dynamics is None:
+                # WHY refused here, before the backend runs: a torque-limited timing without the model would be a guess
+                raise MissingRung(f"time law {self.shape!r}{_mode(self)}", "dynamics_model",
+                                  detail=" (none was handed to the time law: a kind passes dynamics=space.dynamics)")
+            handed["dynamics"] = dynamics
+        if "torque_limits" in needs and not _finite_positive(joint_limits.max_effort):
+            raise MissingRung(f"time law {self.shape!r}{_mode(self)}", "torque_limits")
         refusal = serving.can_service(path, joint_limits, self, start_state, end_state) if hasattr(serving, "can_service") else ""
         if refusal:
             raise ValueError(f"time law {self.shape!r} refuses this request: {refusal}")
-        out = serving.time_parameterize(path, joint_limits, rate_hz, self, start_state=start_state, end_state=end_state)
+        out = serving.time_parameterize(path, joint_limits, rate_hz, self, start_state=start_state, end_state=end_state, **handed)
         if not isinstance(out, JointTrajectory) or out.velocities is None or out.accelerations is None:
             raise ValueError(f"backend {self.shape!r} broke the contract: return a JointTrajectory with velocities and accelerations")
         t = np.asarray(out.t, float)
@@ -395,6 +425,8 @@ class TimeLaw:
             if not np.allclose(q[row], path[row], atol=1e-9):
                 raise ValueError(f"backend {self.shape!r} broke the contract: it does not {which} at the path's {which}")
         q[0], q[-1] = path[0], path[-1]
+        if "dynamics" in handed and _finite_positive(joint_limits.max_effort):
+            _hold_to_max_effort(self.shape, handed["dynamics"], q, out, joint_limits)
         progress = out.channels.get("path_progress")
         progress = None if progress is None else np.asarray(progress, float) / (len(path) - 1)
         return Timed(k.Arrays(np.arange(len(t)) / rate_hz, q, np.asarray(out.velocities, float), np.asarray(out.accelerations, float),
@@ -434,14 +466,15 @@ class TimeLaw:
 
 
 def legs_through(start: np.ndarray, waypoints: Sequence[np.ndarray], law: TimeLaw, limits: Any, rate_hz: float, *,
-                 dwell_s: float, label: str) -> list[k.Arrays]:
+                 dwell_s: float, label: str, dynamics: Any = None) -> list[k.Arrays]:
     """Rest-to-rest legs from ``start`` through each waypoint under ``law``, with a dwell at each: the house leg of every
-    waypoints tape (the rack runner's ``q:move_s:dwell_s;...``; v6's Move, unchanged)."""
+    waypoints tape (the rack runner's ``q:move_s:dwell_s;...``; v6's Move, unchanged). ``dynamics``: the space's model, for a
+    law whose backend needs it (pass ``space.dynamics``)."""
     pieces: list[k.Arrays] = []
     here = np.asarray(start, float)
     for index, target in enumerate(waypoints, start=1):
         target = np.asarray(target, float)
-        pieces.append(law.leg(here, target, limits, rate_hz, label=f"{label}: leg {index}"))
+        pieces.append(law.leg(here, target, limits, rate_hz, label=f"{label}: leg {index}", dynamics=dynamics))
         if dwell_s > 0:
             pieces.append(k.hold(target, dwell_s, rate_hz, label=f"{label}: dwell"))
         here = target
@@ -493,6 +526,28 @@ for _name in BUILT_IN:
 # ====================================================================== helpers
 
 
+def _finite_positive(values: Any) -> bool:
+    return values is not None and bool(np.all(np.isfinite(np.asarray(values, float)))) and bool(np.all(np.asarray(values, float) > 0))
+
+
+def _mode(law: TimeLaw) -> str:
+    return f" with options {dict(law.options)}" if law.options else ""
+
+
+def _hold_to_max_effort(shape: str, dynamics: Any, q: np.ndarray, out: JointTrajectory, limits: JointLimits) -> None:
+    """The model's torque along a backend's result, held to ``max_effort`` at every sample: the caller's own check of a backend
+    that was handed the dynamics, as it checks the ends and the rate (an independent ruler, never the backend's word)."""
+    function = getattr(dynamics, "torque", None) or dynamics.inverse_dynamics
+    velocities, accelerations = np.asarray(out.velocities, float), np.asarray(out.accelerations, float)
+    limit = np.asarray(limits.max_effort, float)
+    for row in range(len(q)):
+        torque = np.abs(np.asarray(function(q[row], velocities[row], accelerations[row]), float).reshape(-1))
+        if np.any(torque > limit * (1 + 1e-6)):
+            joint = int(np.argmax(torque / limit))
+            raise ValueError(f"backend {shape!r} broke the contract: at sample {row} the model needs {torque[joint]:.4f} N·m on "
+                             f"{limits.joint_names[joint]}, over its max_effort {limit[joint]:.4f} N·m")
+
+
 def _at_rest(state: BoundaryState | None) -> bool:
     return state is None or not (np.any(np.asarray(state.velocity) != 0.0) or np.any(np.asarray(state.acceleration) != 0.0))
 
@@ -535,4 +590,4 @@ def _hermite(points: np.ndarray, slopes: np.ndarray, grid: np.ndarray, x: np.nda
 
 
 __all__ = ["BUILT_IN", "BackendInfo", "BoundaryState", "LegTiming", "TIME_LAW_GROUP", "TimeLaw", "TimeLawBackend", "Timed",
-           "backend", "legs_through", "register_time_law", "time_laws"]
+           "backend", "backend_needs", "legs_through", "register_time_law", "time_laws"]

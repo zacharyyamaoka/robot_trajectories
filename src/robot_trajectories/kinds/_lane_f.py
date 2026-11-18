@@ -1,9 +1,10 @@
 """Lane F's shared helpers: what the moving-target kinds (``moving_target_track``, ``track_and_release``,
 ``moving_pick_and_place``) are built on. Imported by those kinds; registers nothing (KINDS_TODO "Rules of the road").
 
-- ``moving_target(value)``: a kind's ``target=`` as a MovingTarget. A recipe is text, so a kind takes the target as a mapping of
-  ``LinearMotion``'s fields (``dataclasses.asdict(LinearMotion.from_sync(pose, sync_dir, sync_speed))`` is one) or a fixed xyz /
-  4x4 (a target that does not move). ``on_clock`` reads a target with a kind's t = 0 somewhere else on the target's clock.
+- ``moving_target(value)``: a kind's ``target=`` as a MovingTarget: a ``LinearMotion`` or ``PoseTrajectory`` object (the
+  recipe keeps its data form), a mapping of ``LinearMotion``'s fields (``dataclasses.asdict(LinearMotion.from_sync(pose,
+  sync_dir, sync_speed))`` is one), or a fixed xyz / 4x4 (a target that does not move). ``on_clock`` reads a target with a
+  kind's t = 0 somewhere else on the target's clock.
 - ``ToolPath`` and its makers: ``chase`` (the tool on the target plus an offset that may itself move: the descent onto a
   moving point is a ramped offset) and ``coast`` (from moving to rest: braking along the way it was going while it travels a
   displacement). A tool path given in time, its velocity and acceleration in closed form.
@@ -13,8 +14,8 @@
   at which a made piece stays inside the velocity and acceleration limits; ``approach``: from rest to a moving state at a given
   sample, under a time law (the quintic through both states).
 
-Every tool path here holds one orientation: the targets a recipe can carry today (``LinearMotion``, a fixed pose) do not
-rotate, and ``target_motion`` refuses one that does rather than drop its rotation.
+Every tool path here holds one orientation: ``target_motion`` refuses a target that rotates (a ``PoseTrajectory`` may)
+rather than drop its rotation; ``LinearMotion`` and a fixed pose never rotate.
 """
 
 from __future__ import annotations
@@ -28,7 +29,7 @@ from typing import Any
 import numpy as np
 
 from ..cartesian import Unreachable, rotation_angle
-from ..moving import CannotCatch, LinearMotion, as_moving_target
+from ..moving import CannotCatch, LinearMotion, as_moving_target, is_target_record, target_from_record
 from ..segments import TOOL_TARGET, Piece
 from ..space import JointSpace, State
 from ..time_law import BoundaryState, TimeLaw
@@ -49,10 +50,11 @@ PACE_VELOCITY_TOLERANCE_M_S = 0.01  # WHY: synchronised()'s velocity tolerance: 
 
 
 def moving_target(value: Any) -> Any:
-    """``target=`` as a MovingTarget: a mapping of LinearMotion's fields (pose, direction, speed, and optionally stamp,
-    latency_s, window), or a fixed xyz / 4x4. WHY a mapping and not the LinearMotion itself: a kind's recipe is JSON, and the
-    registry writes a mapping out but refuses an object it does not know (taking the object needs the registry to encode a
-    MovingTarget: a core change, proposed, not made here)."""
+    """``target=`` as a MovingTarget: a ``LinearMotion`` or a robot_msgs ``PoseTrajectory`` (the registry records either by its
+    data form and hands the rebuilt object back on ``rebuild``), a mapping of LinearMotion's fields (pose, direction, speed, and
+    optionally stamp, latency_s, window: the form these kinds took first, kept), or a fixed xyz / 4x4."""
+    if is_target_record(value):
+        return as_moving_target(target_from_record(value))
     if isinstance(value, Mapping):
         unknown = sorted(set(value) - set(TARGET_FIELDS))
         missing = [name for name in ("pose", "direction", "speed") if name not in value]

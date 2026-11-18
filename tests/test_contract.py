@@ -273,6 +273,67 @@ def test_time_law_backends_are_one_seam():
         raise AssertionError("two providers of one time law were not refused")
 
 
+class _NeedsDynamics:
+    """A plugin-shaped time law that needs the space's dynamics in one mode (TOPP-RA's torque mode has this shape): with the
+    option ``torque`` its ``needs(law)`` names dynamics_model and torque_limits. Minimum-jerk underneath; it records what it was
+    handed, and with the option ``too_fast`` hands back a leg the model cannot drive within max_effort."""
+
+    name = "contract_needs_dynamics"
+
+    def __init__(self):
+        self.handed: list[dict] = []
+
+    def needs(self, law):
+        return ("dynamics_model", "torque_limits") if dict(law.options).get("torque") else ()
+
+    def time_parameterize(self, path_points, limits, rate_hz, law, **handed):
+        from robot_trajectories.time_law import BuiltInBackend
+
+        self.handed.append(dict(handed))
+        plain = TimeLaw.minimum_jerk(move_s=0.15) if dict(law.options).get("too_fast") else law
+        return BuiltInBackend("minimum_jerk").time_parameterize(path_points, limits, rate_hz, plain, start_state=handed.get("start_state"),
+                                                                end_state=handed.get("end_state"))
+
+
+def test_a_time_law_that_needs_the_dynamics_is_handed_the_space_s():
+    from fixtures import lane_b
+
+    probe = _NeedsDynamics()
+    register_time_law(probe, provider="contract-test")
+    torque_law = TimeLaw("contract_needs_dynamics", peak_speed_fraction=0.5, options={"torque": True})
+    space = lane_b.pendulum_space()  # CAN 11's limits, a 5 N·m stand-in max_effort, the CAN 11 dynamics stand-in
+    waypoints = [[0.1], [-0.1]]
+    from robot_trajectories import joint_waypoints, move
+
+    check_kind(joint_waypoints(space, waypoints, time_law=torque_law), space)
+    assert probe.handed and all(entry["dynamics"] is space.dynamics for entry in probe.handed), "legs_through did not hand it on"
+    probe.handed.clear()
+    move(space, time_law=torque_law)
+    assert probe.handed and all(entry["dynamics"] is space.dynamics for entry in probe.handed), "move did not hand it on"
+    arm = lane_b.ur5e_space()  # kinematics, dynamics and a max_effort: cartesian.follow hands the dynamics to along()
+    probe.handed.clear()
+    check_kind(cartesian_path(arm, [arm.forward(arm.home)[:3, 3] + (0.05, 0.0, 0.0)], time_law=torque_law), arm)
+    assert probe.handed and probe.handed[-1]["dynamics"] is arm.dynamics, "cartesian.follow did not hand it on"
+    probe.handed.clear()
+    joint_waypoints(space, waypoints, time_law=TimeLaw("contract_needs_dynamics", peak_speed_fraction=0.5))
+    assert probe.handed and all("dynamics" not in entry for entry in probe.handed), "a backend that does not need it was handed it"
+    for bare, need in ((scenario.pendulum_space(), "dynamics_model"),
+                       (JointSpace.from_limits(robots.PENDULUM_LIMITS).with_dynamics(lane_b.Can11Dynamics()), "torque_limits")):
+        try:
+            joint_waypoints(bare, waypoints, time_law=torque_law)
+        except MissingRung as error:
+            assert error.need == need and "contract_needs_dynamics" in str(error) and "Add it" in str(error), str(error)
+        else:
+            raise AssertionError(f"a time law that needs {need} ran without it")
+    try:  # the caller holds the model's torque along the backend's result to max_effort (an independent ruler)
+        joint_waypoints(lane_b.pendulum_space(max_effort_nm=1.0), [[0.3]],
+                        time_law=TimeLaw("contract_needs_dynamics", peak_speed_fraction=1.0, options={"torque": True, "too_fast": True}))
+    except ValueError as error:
+        assert "broke the contract" in str(error) and "max_effort" in str(error), str(error)
+    else:
+        raise AssertionError("a backend handed the dynamics returned motion over max_effort, and it was used")
+
+
 # ---------------------------------------------------------------------- injected slots: dynamics, effort, collision
 
 

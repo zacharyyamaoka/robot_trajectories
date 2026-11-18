@@ -8,7 +8,10 @@ Each kind is held to the kind contract (kind_contract.check_kind) and to what it
 - every commanded tool point within 1 mm by forward kinematics; an independent check, from forward kinematics and the target
   alone, that the chase keeps the tool over the moving point while it goes down and up;
 - ``CannotCatch`` by cause: ``target_outruns_arm``, ``target_leaves_window``, ``intercept_out_of_reach``, ``time_law_error``;
-- ``chain`` takes a moving boundary only where the states match.
+- ``chain`` takes a moving boundary only where the states match;
+- a moving target passed as an object (a ``LinearMotion``, a robot_msgs ``PoseTrajectory``) is recorded by its data form and
+  rebuilds sample for sample; a bare callable is refused naming ``LinearMotion``;
+- ``meet_moving_point`` (the catalog row that ends moving) chained into ``track_and_release`` is synchronised across the hand-over.
 The tracking error during each sync window is printed after the pass lines (mm).
 """
 
@@ -24,8 +27,11 @@ import scenario
 from fixtures import lane_f as lf
 from fixtures import robots
 from kind_contract import check_kind
-from robot_trajectories import (CannotCatch, LinearMotion, MissingRung, State, bands, chain, hold, moving_pick_and_place,
-                                moving_target_track, recipe, segment_info, synchronised, track_and_release)
+from robot_msgs.trajectory import PoseTrajectory
+from robot_trajectories import (CannotCatch, LinearMotion, MissingRung, State, bands, catalog, chain, hold, kinds, meet_moving_point,
+                                moving_pick_and_place, moving_target_track, rebuild, recipe, segment_info, synchronised,
+                                track_and_release)
+from robot_trajectories.moving import target_from_record, target_record
 from robot_trajectories.segments import TOOL_TARGET
 
 MM = 0.001
@@ -269,6 +275,82 @@ def test_cannot_catch_by_cause():
     late = refused(lambda: moving_target_track(arm, lf.linear_target(far, (0.0, 1.0, 0.0), 0.1), sync_start_s=0.06, sync_end_s=0.5),
                    "time_law_error")
     assert "t = 0.060 s" in late.detail, late.detail
+
+
+# ---------------------------------------------------------------------- a moving target as an object, recorded by its data form
+
+
+def _same_samples(a, b) -> bool:
+    return all(np.array_equal(x, y) for x, y in ((a.t, b.t), (a.positions, b.positions), (a.velocities, b.velocities),
+                                                 (a.accelerations, b.accelerations)))
+
+
+def test_a_moving_target_object_is_recorded_by_its_data_form_and_rebuilds():
+    space = lf.ur5e()
+    pose = space.forward(space.home)
+    pose[:3, 3] += (0.05, -0.10, -0.05)
+    # WHY a direction whose second normalisation moves a bit: the recipe must restore the stored one, not normalise it again
+    rng = np.random.default_rng(7)
+    while True:
+        sideways, upward = rng.normal(size=2)
+        direction = (0.0, abs(sideways), 0.1 * upward)  # mostly +y, where the default test target moves too
+        moving = LinearMotion(pose, tuple(direction), 0.10, stamp=0.2, latency_s=0.03, window=(0.5, 4.0))
+        if LinearMotion(**dataclasses.asdict(moving)).direction != moving.direction:
+            break
+    again = target_from_record(json.loads(json.dumps(target_record(moving))))
+    assert again.direction == moving.direction and np.array_equal(again.pose, moving.pose), "the record is not the same target"
+    assert (again.speed, again.stamp, again.latency_s, again.window) == (moving.speed, moving.stamp, moving.latency_s, moving.window)
+    out = moving_target_track(space, moving, sync_start_s=1.0, sync_end_s=1.5)
+    check_kind(out, space)  # rebuilds sample for sample from the recipe text
+    assert _same_samples(rebuild(recipe(out), space), out), "rebuild() from the text is not the same trajectory"
+    written = json.loads(recipe(out))["calls"][0]["target"]
+    assert written["moving_target"] == "LinearMotion" and written["direction"] == list(moving.direction), written
+    held_to_the_ruler(space, out, moving, 1.0, 1.5, "UR5e moving_target_track, a LinearMotion object, 1.0-1.5 s at 0.10 m/s")
+    as_mapping = moving_target_track(space, dataclasses.asdict(moving), sync_start_s=1.0, sync_end_s=1.5)
+    assert np.max(np.abs(as_mapping.positions - out.positions)) <= 1e-9, "the mapping form and the object form disagree"
+    # A sampled PoseTrajectory (robot_msgs' own dict encoding in the recipe): the same motion, rebuilt exactly.
+    times = np.linspace(0.0, 3.0, 301)
+    sampled = PoseTrajectory.from_matrices(times, np.array([moving.target(float(time)) for time in times]))
+    tape = moving_target_track(space, sampled, sync_start_s=1.0, sync_end_s=1.5)
+    check_kind(tape, space)
+    assert json.loads(recipe(tape))["calls"][0]["target"]["moving_target"] == "PoseTrajectory"
+    report = synchronised(space, tape, moving, t0=1.0, t1=1.5)
+    assert report, report.why
+    ERRORS["UR5e moving_target_track, a sampled PoseTrajectory, 1.0-1.5 s"] = report.worst_position_error_m
+    try:
+        moving_target_track(space, moving.target, sync_start_s=1.0, sync_end_s=1.5)
+    except TypeError as error:
+        assert "LinearMotion" in str(error) and "PoseTrajectory" in str(error), str(error)
+    else:
+        raise AssertionError("a function of time was written into a recipe")
+
+
+# ---------------------------------------------------------------------- meet_moving_point, the row that ends moving
+
+
+def test_meet_moving_point_then_track_and_release_is_synchronised():
+    info = kinds()["meet_moving_point"]
+    assert (info.catalog_id, info.ends, info.module) == ("meet_moving_point", "moving", "robot_trajectories.kinds.meet_moving_point")
+    assert "meet_moving_point" in catalog(use_case="conveyor_pick_and_place").implemented.names
+    for space, start, offset, direction, speed, up in ((lf.ur5e(), None, (0.04, -0.08, -0.06), (0.0, 1.0, 0.0), 0.08, (0.0, 0.0, 1.0)),
+                                                       (lf.fivebar(), lf.FIVEBAR_START, (-0.02, 0.02, 0.0), (1.0, 0.0, 0.0), 0.03,
+                                                        lf.FIVEBAR_UP)):
+        here = space.home if start is None else start
+        pose = np.eye(4) if space.position_only else space.forward(here)
+        pose[:3, 3] = space.forward(here)[:3, 3] + offset
+        moving = LinearMotion(pose, direction, speed)
+        meet = meet_moving_point(space, moving, sync_start_s=1.0, sync_end_s=1.3, start=start)
+        check_kind(meet, space)
+        assert segment_info(meet)[0]["ends"] == "moving" and np.max(np.abs(meet.velocities[-1])) > 1e-3, "it does not end moving"
+        release = track_and_release(space, moving, dwell_s=0.3, leave_direction=up, target_clock_s=float(meet.t[-1]), start=meet)
+        joined = chain(meet, release)
+        check_kind(joined, space)
+        if space.position_only:
+            reachable_fivebar(joined)
+        name = f"{'five-bar' if space.position_only else 'UR5e'} meet_moving_point + track_and_release (the kind), 1.0-1.6 s"
+        held_to_the_ruler(space, joined, moving, 1.0, 1.6, name)
+        assert tracks(space, joined) <= MM
+        assert _same_samples(rebuild(joined, space), joined), "the chained recipe does not rebuild the hand-over"
 
 
 # ---------------------------------------------------------------------- defaults from the space (f(space) alone)

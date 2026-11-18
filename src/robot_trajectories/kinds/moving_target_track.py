@@ -18,8 +18,9 @@ def moving_target_track(space, target=None, *, sync_start_s=1.0, sync_end_s=2.0,
     then coast to rest. Times are on this trajectory's clock (t = 0 its first sample), as the target's are.
 
     - ``target``: None (a default from the space: through the tool's start point at the window's middle, 5 cm/s along the
-      way the arm moves the tool most easily there), a mapping of ``LinearMotion``'s fields (``dataclasses.asdict(LinearMotion.from_sync(pose, sync_dir,
-      sync_speed))``: constant velocity along a line) or a fixed xyz / 4x4. Its ``assumes`` goes in the segment entry with
+      way the arm moves the tool most easily there), a ``LinearMotion`` (``LinearMotion.from_sync(pose, sync_dir, sync_speed)``:
+      constant velocity along a line) or a mapping of its fields, a robot_msgs ``PoseTrajectory`` (sampled poses, no rotation),
+      or a fixed xyz / 4x4. The recipe keeps the target's data form, so ``rebuild`` makes the same samples. Its ``assumes`` goes in the segment entry with
       ``sync`` = [t0, t1]: the trajectory is a prediction under it (PEP 0002 §7).
     - ``pose_in_target``: where the tool sits in the target's frame (an xyz offset or a 4x4); None is on the target.
     - ``orientation``: "hold" keeps the tool's start orientation; "follow" takes the target's (composed with the offset).

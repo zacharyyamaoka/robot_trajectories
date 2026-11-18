@@ -163,7 +163,8 @@ def follow(space: JointSpace, start: np.ndarray, path: Path, law: TimeLaw, *, le
         index = int(np.argmax(steps > jump_threshold * mean)) + 1
         raise Unreachable(label, index=index, count=count, point=targets[index][:3, 3],
                           why=f"a joint-space jump {steps[index - 1] / mean:.1f}x the mean step (jump_threshold {jump_threshold:g})")
-    timed = law.along(q, space.limits, space.rate_hz, label=label, progress_grid=grid)
+    # WHY the space's dynamics handed on: a time law whose backend needs them (TOPP-RA's torque mode) bounds torque along the path
+    timed = law.along(q, space.limits, space.rate_hz, label=label, progress_grid=grid, dynamics=space.dynamics)
     arrays = timed.arrays
     if timed.progress is not None:
         tool = path(np.clip(timed.progress, 0.0, 1.0))[:, :3, 3]

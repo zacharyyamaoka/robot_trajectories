@@ -166,7 +166,7 @@ ruckig = "robot_trajectories_ruckig:RuckigBackend"
 |---|---|---|---|
 | `plugins/robot_trajectories_ruckig/` | `ruckig` | Ruckig **Community** (PyPI `ruckig`): state-to-state legs, boundary states (target velocity / acceleration), jerk from `max_jerk` | **never intermediate waypoints**: Community sends them to Ruckig's cloud. `can_service` refuses more than two path points and names the Pro package |
 | `plugins/robot_trajectories_ruckig_pro/` | `ruckig` (a drop-in, same name) | Ruckig **Pro**, the local build: intermediate waypoints (`WaypointsCalculator`), position limits | on load, verify provenance as bam_ws `bam_traj_gen/ruckig_backend.require_local_ruckig_pro` does (the `ruckig-pro` distribution at the pinned version, from the workspace checkout's `direct_url.json`, the Pro-only API present, no cloud markers in the native module) and refuse to register otherwise; never installed beside Community (`time_law.backend` refuses two providers of one name) |
-| `plugins/robot_trajectories_toppra/` | `toppra` | TOPP-RA: time-optimal along a dense joint path; boundary path speeds | the torque-constrained mode needs the space's dynamics, which a backend does not see yet: propose that core change as a barrier, do not work around it |
+| `plugins/robot_trajectories_toppra/` | `toppra` | TOPP-RA: time-optimal along a dense joint path; boundary path speeds; torque-limited mode (`effort_fraction`) | the torque mode reads the space's dynamics through the seam's `dynamics=` (landed 2026-11-18, PEP 0002 §6): `needs(law)` names `dynamics_model` and `torque_limits`, the model's torque stays within `max_effort` at every sample |
 
 | row | function → file | rung | robots | notes |
 |---|---|---|---|---|
@@ -178,8 +178,8 @@ ruckig = "robot_trajectories_ruckig:RuckigBackend"
 The contract is `robot_trajectories.moving` (PEP 0002 §7): a `MovingTarget` (`target(t)`, `velocity(t)`, `stamp`,
 `latency_s`, `window`, `assumes`; `LinearMotion` is the constant-velocity case and absorbs bam_traj_gen's
 `sync_dir` / `sync_speed`), `TargetWaypoint` (`chase` / `inherit` / `fixed`), `CannotCatch(cause)` refusals, and the ruler
-`synchronised(space, trajectory, target, t0=, t1=)`. A lane-F kind takes `target=` (anything `as_moving_target` accepts)
-and a sync window, starts and ends at rest, writes the target's `assumes` into its segment entry
+`synchronised(space, trajectory, target, t0=, t1=)`. A lane-F kind takes `target=` (a `LinearMotion` or `PoseTrajectory`
+object, recorded by its data form, or LinearMotion's fields as a mapping, or a fixed pose) and a sync window, starts and ends at rest, writes the target's `assumes` into its segment entry
 (`Motion(..., entry={"assumes": target.assumes, "sync": [t0, t1]})`), and refuses with `CannotCatch` (never a silent
 miss). Shared helpers go in `kinds/_lane_f.py`: a numeric Jacobian from `space.forward` (the joint velocity that gives the
 target's twist at the sync point), and a follower that solves IK at every sample of a time-given tool path.
@@ -187,6 +187,7 @@ target's twist at the sync point), and a follower that solves IK at every sample
 | row (priority) | function → file | rung | robots | notes |
 |---|---|---|---|---|
 | `moving_target_track` (next) | `moving_target_track` → `kinds/moving_target_track.py` | kinematics | five-bar (a point moving in the plane), UR5e | rest → quintic leg ending at `target(t0)` with matched velocity (`end_state=`) → track to t1 → quintic to rest |
+| `meet_moving_point` (next, built) | `meet_moving_point` → `kinds/meet_moving_point.py` | kinematics | five-bar, UR5e | `ends="moving"`: `moving_target_track` without the coast, the state `track_and_release` continues (promoted from the lane-F test stand-in 2026-11-18) |
 | `track_and_release` (later) | `track_and_release` → `kinds/track_and_release.py` | kinematics | five-bar, UR5e | `starts="moving"`: continues a tracked state, dwells in the target's frame, leaves along a direction to rest |
 | `moving_pick_and_place` (next) | `moving_pick_and_place` → `kinds/moving_pick_and_place.py` | kinematics | UR5e (3D/6D) | `pick_and_place`'s U where the first point moves: down / dwell / up chase it (`TargetWaypoint(sync="chase")`), the leg after inherits the offset |
 

@@ -4,12 +4,14 @@ UR5e, through its real entry point. A plain script (the arm may be powered: neve
     /home/bam/robot_trajectories/plugins/robot_trajectories_toppra/.venv/bin/python /home/bam/robot_trajectories/plugins/robot_trajectories_toppra/tests/test_toppra.py
 
 Independent oracles, not the backend's words: a straight leg's time-optimal duration in closed form (bang-coast-bang under the
-tightest joint's scaled limits); the dense path re-read at the backend's ``path_progress`` by linear interpolation; and on a
-Cartesian line, forward kinematics of the output against the line itself.
+tightest joint's scaled limits); the dense path re-read at the backend's ``path_progress`` by linear interpolation; on a
+Cartesian line, forward kinematics of the output against the line itself; and in the torque-limited mode, the dynamics
+model's own torque along the output (``space.torques``) against ``max_effort``.
 """
 
 from __future__ import annotations
 
+import json
 import math
 import os
 import pathlib
@@ -25,8 +27,9 @@ import _runner  # noqa: E402
 import robot_trajectories as rt  # noqa: E402
 import scenario  # noqa: E402
 from fixtures import robots  # noqa: E402
+from fixtures import lane_b  # noqa: E402
 from kind_contract import check_kind  # noqa: E402
-from robot_trajectories import BoundaryState, JointSpace, TimeLaw  # noqa: E402
+from robot_trajectories import BoundaryState, JointSpace, MissingRung, TimeLaw  # noqa: E402
 from robot_trajectories.segments import TOOL_TARGET  # noqa: E402
 
 PROVIDER = "robot-trajectories-toppra"
@@ -186,7 +189,7 @@ def test_time_optimal_path_kind_on_three_robots():
 # ---------------------------------------------------------------------- refusals, by name
 
 
-def test_refuses_moving_ends_the_torque_mode_and_unknown_options_by_name():
+def test_refuses_moving_ends_a_torque_mode_without_its_inputs_and_unknown_options_by_name():
     space = pendulum()
     law = TimeLaw("toppra", peak_speed_fraction=1.0)
     try:
@@ -195,7 +198,7 @@ def test_refuses_moving_ends_the_torque_mode_and_unknown_options_by_name():
         assert "rest to rest" in str(error) and "minimum_jerk" in str(error), error
     else:
         raise AssertionError("a moving end was not refused")
-    for options, words in (({"torque_limits": True}, "core change"), ({"grid": 50}, "no option ['grid']"),
+    for options, words in (({"torque_limits": True}, "no option ['torque_limits']"), ({"grid": 50}, "no option ['grid']"),
                            ({"acceleration_fraction": 1.5}, "acceleration_fraction"), ({"grid_points": 1}, "grid_points")):
         try:
             TimeLaw("toppra", peak_speed_fraction=1.0, options=options).leg(np.zeros(1), np.full(1, 0.2), space.limits, space.rate_hz)
@@ -203,9 +206,58 @@ def test_refuses_moving_ends_the_torque_mode_and_unknown_options_by_name():
             assert words in str(error), (options, error)
         else:
             raise AssertionError(f"{options} was not refused")
-    import robot_trajectories_toppra as plugin
+    # The torque-limited mode needs the space's dynamics and a max_effort: refused before TOPP-RA runs, naming the rung.
+    for bare, need in ((pendulum(), "dynamics_model"),
+                       (JointSpace.from_limits(robots.PENDULUM_LIMITS).with_dynamics(lane_b.Can11Dynamics()), "torque_limits")):
+        try:
+            rt.time_optimal_path(bare, effort_fraction=1.0)
+        except MissingRung as error:
+            assert error.need == need and "Add it" in str(error), error
+        else:
+            raise AssertionError(f"the torque-limited mode ran without {need}")
+    try:
+        rt.time_optimal_path(lane_b.pendulum_space(), effort_fraction=1.5)
+    except ValueError as error:
+        assert "effort_fraction must lie in (0, 1]" in str(error), error
+    else:
+        raise AssertionError("effort_fraction 1.5 was not refused")
+    try:  # holding still at the path's far end already needs gravity 4.661 sin(0.33) = 1.51 N·m
+        rt.time_optimal_path(lane_b.pendulum_space(max_effort_nm=1.0), [[0.0], [0.33]], effort_fraction=1.0)
+    except ValueError as error:
+        assert "holding still at path point 1" in str(error), error
+    else:
+        raise AssertionError("a path whose gravity alone breaks the bound was timed")
 
-    assert "dynamics" in plugin.NEEDED_CORE_CHANGE and "max_effort" in plugin.NEEDED_CORE_CHANGE
+
+# ---------------------------------------------------------------------- the torque-limited mode, on the CAN 11 pendulum
+
+
+def test_torque_limited_on_the_can11_pendulum_is_never_faster_and_stays_within_max_effort():
+    """Lane B's CAN 11 stand-in (tests/fixtures/lane_b.py: inertia 0.122 kg m^2, gravity 4.661 N·m, Coulomb 0.833 N·m, viscous
+    0.02): its friction is outside TOPP-RA's rigid-body form, so the bound has to hold by the model's own torque, not TOPP-RA's."""
+    probe = pendulum()
+    paths = {"the default loop": None, "a dense sine": dense_path(probe, 60)}
+    slower = 0
+    for effort_nm in (lane_b.CAN11_DRIVE_LIMIT_NM, 2.0, 1.6, 1.4):
+        space = lane_b.pendulum_space(max_effort_nm=effort_nm)
+        for name, path in paths.items():
+            kinematic = rt.time_optimal_path(space, path)
+            limited = rt.time_optimal_path(space, path, effort_fraction=1.0)
+            check_kind(limited, space)
+            assert limited.t[-1] >= kinematic.t[-1], f"{name} at {effort_nm} N·m: {limited.t[-1]:.3f} s beats the kinematic {kinematic.t[-1]:.3f} s"
+            effort = float(np.max(np.abs(space.torques(limited))))
+            assert effort <= effort_nm * (1 + 1e-9), f"{name}: the model needs {effort:.4f} N·m, over max_effort {effort_nm} N·m"
+            needed = float(np.max(np.abs(space.torques(kinematic))))
+            if needed <= effort_nm:  # the bound does not bind: the kinematic optimum, sample for sample
+                assert np.array_equal(limited.positions, kinematic.positions) and np.array_equal(limited.t, kinematic.t), name
+            elif limited.t[-1] > kinematic.t[-1]:
+                slower += 1
+    assert slower >= 3, f"the torque bound slowed only {slower} timings: the test is not exercising the mode"
+    # the fraction: within 0.8 x 2.0 N·m
+    space = lane_b.pendulum_space(max_effort_nm=2.0)
+    tape = rt.time_optimal_path(space, effort_fraction=0.8)
+    assert float(np.max(np.abs(space.torques(tape)))) <= 1.6 * (1 + 1e-9)
+    assert json.loads(rt.recipe(tape))["calls"][0]["effort_fraction"] == 0.8, "the mode is in the recipe"
 
 
 if __name__ == "__main__":

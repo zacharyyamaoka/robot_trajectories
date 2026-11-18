@@ -28,4 +28,4 @@ def joint_waypoints(space, waypoints, *, time_law=TimeLaw.minimum_jerk(peak_spee
             raise ValueError(f"waypoint {index} puts {space.joint_names[joint]} at {math.degrees(row[joint]):.2f}°, outside its limits "
                              f"{math.degrees(bounds.low[joint]):.2f}..{math.degrees(bounds.high[joint]):.2f}°")
     targets = [*rows, start] if back_to_start else list(rows)
-    return legs_through(start, targets, time_law, space.limits, space.rate_hz, dwell_s=dwell_s, label=label)
+    return legs_through(start, targets, time_law, space.limits, space.rate_hz, dwell_s=dwell_s, label=label, dynamics=space.dynamics)

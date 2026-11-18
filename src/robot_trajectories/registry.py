@@ -18,8 +18,8 @@ body is only its motion:
 4. **Guards** the output: inside the position, velocity, acceleration (and torque) limits, no jumps, at rest at both ends
    unless the kind declares ``starts="moving"`` / ``ends="moving"`` (a boundary state handed on exactly, ``chain`` checks
    it) or ``ends="anywhere"`` (event-ended), and free of collision when the space has a collision model.
-5. **Records the call** in ``header.meta["recipe"]``: the name, every argument with defaults written out, the space's
-   fingerprint. A higher-order kind's recipe is its own one call; its segments keep the calls that make each alone.
+5. **Records the call** in ``header.meta["recipe"]``: the name, every argument with defaults written out (a moving target by
+   its data form: a ``LinearMotion`` or a ``PoseTrajectory``, never a callable), the space's fingerprint. A higher-order kind's recipe is its own one call; its segments keep the calls that make each alone.
 
 Kinds are found by importing ``kinds/*.py`` (one file per kind) and every module an installed package names in the
 entry-point group ``robot_trajectories.kinds`` (``plugins.py``). Both register the same way, and are listed the same way.
@@ -40,9 +40,10 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
-from robot_msgs.trajectory import JointTrajectory
+from robot_msgs.trajectory import JointTrajectory, PoseTrajectory
 
 from . import kernels as k
+from .moving import LinearMotion, has_data_form, is_target_record, target_from_record, target_record
 from .segments import RECIPE_FORMAT, TRANSITION_SPEED, Motion, Piece, _Block, assemble, guard, segment_info, with_segments
 from .space import JointSpace, MissingRung, State, Status
 from .time_law import TimeLaw
@@ -302,6 +303,8 @@ def _normalize(kind_name: str, key: str, value: Any) -> Any:
 def _decode(value: Any) -> Any:
     if isinstance(value, Mapping) and "time_law" in value:
         return TimeLaw.from_config(value)
+    if is_target_record(value):
+        return target_from_record(value)  # WHY the object, not the mapping: the body is handed what the first call was handed
     if isinstance(value, (list, tuple, np.ndarray)):
         return tuple(_decode(item) for item in value)
     if isinstance(value, np.bool_):
@@ -321,6 +324,8 @@ def _encode(key: str, value: Any) -> Any:
         return value.to_config()
     if isinstance(value, TimeLaw):
         return value.to_config()
+    if has_data_form(value):
+        return target_record(value)  # a LinearMotion or a PoseTrajectory, tagged "moving_target" (moving.py)
     if isinstance(value, (list, tuple, np.ndarray)):
         return [_encode(key, item) for item in value]
     if isinstance(value, np.generic):
@@ -329,13 +334,24 @@ def _encode(key: str, value: Any) -> Any:
         return value
     if isinstance(value, Mapping):
         return {str(name): _encode(key, item) for name, item in value.items()}
-    raise TypeError(f"parameter {key}={value!r} cannot be written as text: pass numbers, names, lists or a TimeLaw")
+    if callable(value) or (callable(getattr(value, "target", None)) and callable(getattr(value, "velocity", None))):
+        # WHY refused, not pickled or skipped: a recipe must rebuild the same motion from text, and a function is code
+        raise TypeError(f"parameter {key}={value!r} cannot be written as text: a function of time has no data form. A moving "
+                        "target is recorded as a LinearMotion (constant velocity; LinearMotion.from_sync(pose, sync_dir, "
+                        "sync_speed)) or a robot_msgs PoseTrajectory (sampled poses): pass one of those")
+    raise TypeError(f"parameter {key}={value!r} cannot be written as text: pass numbers, names, lists, a TimeLaw, or a LinearMotion "
+                    "or PoseTrajectory as a moving target")
 
 
 def _brief(value: Any) -> str:
     """A value as a person reads it in a summary: a 4x4 pose as its point in mm, a float to 4 significant digits."""
     if isinstance(value, tuple) and len(value) == 4 and all(isinstance(row, tuple) and len(row) == 4 for row in value):
         return "pose@(" + ", ".join(f"{1000 * float(row[3]):.1f}" for row in value[:3]) + ") mm"
+    if isinstance(value, LinearMotion):
+        point = ", ".join(f"{1000 * float(v):.1f}" for v in value.pose[:3, 3])
+        return f"LinearMotion(@({point}) mm, {value.speed:.4g} m/s along ({', '.join(f'{v:+.3f}' for v in value.direction)}))"
+    if isinstance(value, PoseTrajectory):
+        return f"PoseTrajectory({len(value.t)} poses, {float(value.t[0]):.3f}..{float(value.t[-1]):.3f} s)"
     if isinstance(value, tuple):
         return "(" + ", ".join(_brief(item) for item in value) + ("," if len(value) == 1 else "") + ")"
     if isinstance(value, float):

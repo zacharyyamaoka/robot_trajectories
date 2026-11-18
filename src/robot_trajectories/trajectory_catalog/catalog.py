@@ -1141,6 +1141,24 @@ CATALOG: tuple[TrajectoryKind, ...] = (
               "robot_trajectories.moving (synchronised). bam_grasp's conveyor leads the target by 0.25 s to cancel servo lag.",
     ),
     TrajectoryKind(
+        id="meet_moving_point", name="Meet a moving point, end moving with it", family="task_cycle",
+        one_line="From rest, meet a point that moves at the sync time with its velocity matched and stay on it to the end of the "
+                 "sync window, ending there in motion with it: the first half of a moving-target cycle (track_and_release is the "
+                 "second).",
+        use_cases=("tracking_eval", "conveyor_pick_and_place"),
+        # WHY path: the target's motion is geometry given in time; the approach leg takes a time law (moving_target_track's call)
+        starts_as="path", dimensions=("1D", "2D", "3D", "6D"),
+        space="cartesian", scope="cartesian_path", output="joint_trajectory",
+        needs=(*LIMITS, "forward_kinematics", "inverse_kinematics"),
+        parameters=(("sync_start_s", "s", 1.0), ("sync_end_s", "s", 1.3), ("tolerance_m", "m", 0.0001)),
+        segments_join="ends_moving",
+        exists_in=(f"{CONVEYOR}:72",),
+        prior_art=(),
+        priority="next",
+        notes="Added 2026-11-18, promoted from lane F's test stand-in: no row ended moving at a target, so track_and_release had "
+              "nothing in the catalog to follow. chain refuses a follower that does not start in its exact end state.",
+    ),
+    TrajectoryKind(
         id="track_and_release", name="Track, then leave a moving point", family="task_cycle",
         one_line="Already moving with a point, keep with it for a dwell in its frame, then leave it along a direction to rest: "
                  "the second half of a moving-target cycle.",

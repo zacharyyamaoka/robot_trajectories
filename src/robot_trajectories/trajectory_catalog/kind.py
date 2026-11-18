@@ -141,6 +141,7 @@ JOINS: tuple[str, ...] = (
     "starts_and_ends_at_rest",    # zero velocity at both ends (anywhere): joins by a rest-to-rest move
     "periodic_returns_to_start",  # ends where it started, at rest, after whole periods (faded in and out)
     "ends_anywhere",              # ends wherever physics leaves it (a coast, a stall, a replan): the next segment starts from the measurement
+    "ends_moving",                # ends in motion in a planned state (a synchronised hand-over): the next segment starts in that exact state
 )
 
 PRIORITIES: tuple[str, ...] = (

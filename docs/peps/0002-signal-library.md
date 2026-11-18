@@ -52,6 +52,7 @@ catalog(use_case="pid_tuning", space=space)                         # what gener
 kinds()                                                             # the registry: in-tree kinds/*.py and entry-point plugins
 @kind(use_cases=..., needs=..., catalog_id=..., starts_as=..., dimensions=...)   # a new kind: one decorated function, one file
 LinearMotion.from_sync(pose, sync_dir, sync_speed); synchronised(space, t, target, t0=, t1=)   # the moving-target contract
+track_and_release(space, target, start=meet_moving_point(space, target))   # a target object in, its data form in the recipe
 summary(session)                                                    # one line per segment: span, label, call, then wait
 ```
 
@@ -130,7 +131,8 @@ dimensions=None, starts="at_rest", ends="at_rest", command="position", higher_or
    collision checker, no colliding sample (the first one is named). Tolerances are the round's ruler's (check_scenario.py G3).
    A higher-order kind is re-guarded whole (collisions only on transitions: every other segment was checked by its kind).
 6. Records the call: `{"kind", every argument with defaults written out, "start"}` in `header.meta["recipe"]` beside the
-   space's record and fingerprint; a moving start is recorded as its whole state.
+   space's record and fingerprint; a moving start is recorded as its whole state; a moving target by its data form (§7); a
+   callable is refused, naming `LinearMotion`.
 
 **Segments.** Per-sample `channels["segment"]` and `channels["piece"]` (a segment owns its samples after its first; its first
 is the previous one's last); `header.meta["segments"]`: per segment `label`, `call` (the call that makes it alone; null for a
@@ -170,9 +172,10 @@ closed-form FK/IK of its tool point (the bench geometry); the UR5e's DH forward 
 
 `TimeLaw(shape, peak_speed_fraction= | move_s=, min_move_s=, ramp_fraction=, options=)`. A path kind takes one as its timing
 argument (`Path x time law -> JointTrajectory`, the refined spec). Built in: **minimum-jerk** (v6's, unchanged) and
-**trapezoid** (Pilz PTP's profile, a fixed ramp fraction). `law.leg(q0, q1, limits, rate, start_state=, end_state=)` times one
-leg (the quintic through both states when either end moves; a trapezoid refuses a moving end by name); `law.along(path,
-limits, rate)` follows a dense joint path (q(s), its derivatives set the duration).
+**trapezoid** (Pilz PTP's profile, a fixed ramp fraction). `law.leg(q0, q1, limits, rate, start_state=, end_state=,
+dynamics=)` times one leg (the quintic through both states when either end moves; a trapezoid refuses a moving end by name);
+`law.along(path, limits, rate, dynamics=)` follows a dense joint path (q(s), its derivatives set the duration). `dynamics` is
+the space's model, for a backend that needs it; the built-in laws never read it.
 
 Plugins are cut by **role**, not by simple vs complex (prior-art note 2026-11-18 §7): a trapezoid and TOPP-RA are the same
 role; Ruckig Pro's waypoint mode is a different one.
@@ -180,7 +183,7 @@ role; Ruckig Pro's waypoint mode is a different one.
 | entry-point group | role | in, out | built in | plugins |
 |---|---|---|---|---|
 | `robot_trajectories.kinds` | kinds | `f(space, ..., start)` -> JointTrajectory | `kinds/*.py` | a robot's own kinds; `tests/fixtures/plugin_site` (the test plugin) |
-| `robot_trajectories.time_laws` | time laws | path + limits (+ boundary states) -> timed JointTrajectory | minimum-jerk, trapezoid | Ruckig, Ruckig Pro, TOPP-RA (lane E) |
+| `robot_trajectories.time_laws` | time laws | path + limits (+ boundary states, + the space's dynamics when needed) -> timed JointTrajectory | minimum-jerk, trapezoid | Ruckig, Ruckig Pro, TOPP-RA (lane E; its torque-limited mode reads the dynamics) |
 | `robot_trajectories.planners` | planners (reserved) | start, goal, the space's collision check -> joint path points (a time law then times them) | none | caelan's motion-planners, OMPL, VAMP |
 | `robot_trajectories.optimizers` | optimizers (reserved) | path and timing together; register as kinds that need a model | none | Drake, cuRobo, TrajOpt, Ruckig Pro waypoints |
 
@@ -188,7 +191,20 @@ role; Ruckig Pro's waypoint mode is a different one.
 start_state=None, end_state=None) -> JointTrajectory` sampled at the rate from t = 0, starting and ending at the path's ends in
 the given states (rest by default), passing every point in order, inside `limits` (already scaled by the law's speed
 fraction), optionally with a `path_progress` channel; optional `can_service(...) -> str` (why not; MoveIt's
-canServiceRequest) and `needs`. The caller checks the contract (rate, ends, end velocities) and guards the result.
+canServiceRequest) and `needs`: a tuple of the catalog's needs, or a method `needs(law)` when they depend on the law. The
+caller checks the contract (rate, ends, end velocities) and guards the result.
+
+**The space's dynamics reach a backend that needs them** (landed 2026-11-18; it was §11's open core change). When a
+backend's needs name `dynamics_model`, `_by_backend` calls `time_parameterize(..., dynamics=model)` with the model the caller
+handed `leg` / `along` (as injected: `torque(q, qd, qdd)`, or pin_utils' `inverse_dynamics`); no model is a `MissingRung`
+before the backend runs, and so is `torque_limits` named with no finite `max_effort`. The torque bound is the `max_effort`
+already in `limits`, and the caller holds the model's torque along the result to it at every sample (an independent ruler,
+as it checks the ends). A backend that does not name `dynamics_model` is never handed a model. The callers that time paths
+hand `space.dynamics` on: `legs_through` (so `joint_waypoints` and `move`), `cartesian.follow` (so `cartesian_path` and every
+Cartesian kind built on it) and `time_optimal_path`. TOPP-RA's torque-limited mode is the first user:
+`time_optimal_path(space, path, effort_fraction=0.9)` (the `toppra` law's `effort_fraction` option) keeps the model's torque
+within that fraction of `max_effort` at every sample, never faster than the kinematic timing; how it handles a model outside
+TOPP-RA's rigid-body form (friction) is in the plugin's docstring.
 
 **Rules the seam keeps.**
 - **Two providers of one name are refused**, never ranked (bam_traj_gen `ruckig_backend.require_local_ruckig_pro`: Community
@@ -220,7 +236,12 @@ A `MovingTarget` is `target(t) -> pose`, `velocity(t) -> twist`, `stamp`, `laten
 `assumes` (the motion model in words). `LinearMotion` is the constant-velocity case and absorbs bam_traj_gen's belt chase
 (`ArmParams.sync_dir` / `sync_speed`, waypoint_action.py:223; `execution_latency`). `TargetWaypoint(pose_in_target, sync)`
 says which waypoints chase it (`chase`), keep the offset reached at the sync point (`inherit`, bam's `sync_at_target_time`)
-or stay in the base frame (`fixed`). Refusals are named: `CannotCatch(cause)`, code `cannot_catch` (bam_traj_gen
+or stay in the base frame (`fixed`). **A target is data in a recipe**: a kind's `target=` may be a `LinearMotion` or a robot_msgs
+`PoseTrajectory` object (or LinearMotion's fields as a mapping, the first form), and the recipe writes its data form, tagged
+`moving_target` (LinearMotion's fields; the PoseTrajectory in robot_msgs' own `to_dict`), which decodes to the identical
+object, so `rebuild` makes the identical samples. A bare callable has no data form and is refused, naming `LinearMotion`.
+**`meet_moving_point`** ends moving with the target (catalog row of the same name, `segments_join="ends_moving"`), so
+`track_and_release` follows it and `chain` checks the hand-over state. Refusals are named: `CannotCatch(cause)`, code `cannot_catch` (bam_traj_gen
 traj_generator.py:41), causes `target_outruns_arm`, `residual_grows`, `intercept_out_of_reach`, `time_law_error`,
 `target_leaves_window`.
 
@@ -279,12 +300,19 @@ for bit, which no ported tape does (the floor tape's digests hold on all three r
 - **Seven catalog rows added** so lanes never edit the catalog: `joint_waypoints`, `cartesian_waypoints`, `cartesian_arc`,
   `approach_retreat`, `moving_target_track`, `track_and_release`, `moving_pick_and_place`; the use-case tag
   `conveyor_pick_and_place` added and set on `pick_and_place_cycle`, `touch_down_contact`, `rapid_replan` and the moving rows.
+- **An eighth, `meet_moving_point`, and the join `ends_moving`** (2026-11-18, the lanes' flagged core changes): the lane F test
+  stand-in promoted to a kind with its motion unchanged, so `track_and_release` has a row to follow. Undo: delete
+  `kinds/meet_moving_point.py` and the row, put the stand-in back in `tests/fixtures/lane_f.py`.
+- **A moving target is recorded by its data form** (`moving.target_record`), the stored direction restored exactly rather
+  than normalised again. Undo: drop `has_data_form` from `registry._encode` (kinds then take the mapping form only).
+- **Time-law backends see the dynamics** by a `dynamics=` keyword on `leg` / `along`, passed only to a backend whose needs
+  name `dynamics_model`, and the result's torque is held to `max_effort` by the caller. Undo: remove the keyword from
+  `time_law.py` and its callers, and `effort_fraction` from the TOPP-RA plugin and `time_optimal_path`.
 
 ## 11. Not built (and where it goes)
 
 The 50 catalog rows `catalog().todo` lists, split into lanes A-F in [docs/KINDS_TODO.md](../KINDS_TODO.md); the Ruckig,
-Ruckig Pro and TOPP-RA backends (lane E); a backend that needs the space's dynamics (TOPP-RA's torque mode) needs the space
-handed to the backend, a core change to propose first; jerk is not guarded (no built-in kind is jerk-limited); planners and
+Ruckig Pro and TOPP-RA backends (lane E; TOPP-RA's torque mode landed with the dynamics seam, §6); jerk is not guarded (no built-in kind is jerk-limited); planners and
 optimizers are reserved roles; smooth Cartesian curves (arcs, rasters) are lane C/D kinds on `cartesian.follow`.
 
 ## 12. Migration (who moves onto this, later)

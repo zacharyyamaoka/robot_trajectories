@@ -16,10 +16,14 @@ TOPPRA_PACKAGE = "robot-trajectories-toppra"
 
 
 @kind(use_cases=("cycle_time", "speed_limits"), catalog_id="time_optimal_path")
-def time_optimal_path(space, path=None, *, velocity_fraction=1.0, acceleration_fraction=1.0, grid_points=GRID_POINTS,
-                      label="time-optimal path", start=None):
+def time_optimal_path(space, path=None, *, velocity_fraction=1.0, acceleration_fraction=1.0, effort_fraction=None,
+                      grid_points=GRID_POINTS, label="time-optimal path", start=None):
     """The fastest timing along a fixed joint path under ``velocity_fraction`` / ``acceleration_fraction`` of the space's
     limits, rest to rest: TOPP-RA (Pham & Pham 2018) on a cubic spline through every point, ``grid_points`` its grid.
+
+    ``effort_fraction``: None (the default) bounds velocity and acceleration only; a number in (0, 1] also keeps the space's
+    dynamics model's torque within that fraction of ``max_effort`` at every sample (TOPP-RA's torque-limited mode: never
+    faster than the kinematic timing). It needs ``space.with_dynamics(model)`` and a ``max_effort``, else ``MissingRung``.
 
     ``path``: M x J rad, M >= 2, in order (a flat list on a 1-DOF robot). ``None`` (the default): a loop from the start out to
     half the room (joints alternating in sign), across to -0.4 of it on every joint, and back to the start. The path is fixed
@@ -27,8 +31,11 @@ def time_optimal_path(space, path=None, *, velocity_fraction=1.0, acceleration_f
     into it. Every point must lie inside the position limits; the first one outside is refused by name. Timed by the
     ``toppra`` time law, a plugin (``robot-trajectories-toppra``): without it the kind is locked (``MissingRung``)."""
     # WHY built here, not as a default argument: a default is evaluated at import, before plugins load (KINDS_TODO lane E)
-    law = plugin_law("time_optimal_path", "toppra", TOPPRA_PACKAGE, peak_speed_fraction=velocity_fraction,
-                     options={"acceleration_fraction": acceleration_fraction, "grid_points": int(grid_points)})
+    options = {"acceleration_fraction": acceleration_fraction, "grid_points": int(grid_points)}
+    if effort_fraction is not None:
+        # WHY only when asked: the kinematic law's options (and so its recipe) stay what they were before the torque mode existed
+        options["effort_fraction"] = float(effort_fraction)
+    law = plugin_law("time_optimal_path", "toppra", TOPPRA_PACKAGE, peak_speed_fraction=velocity_fraction, options=options)
     if path is None:
         room = space.room(start)
         half = np.minimum(start - room.low, room.high - start)
@@ -48,4 +55,5 @@ def time_optimal_path(space, path=None, *, velocity_fraction=1.0, acceleration_f
             joint = int(outside[0])
             raise ValueError(f"path point {index} puts {space.joint_names[joint]} at {math.degrees(row[joint]):.2f}°, outside its "
                              f"limits {math.degrees(bounds.low[joint]):.2f}..{math.degrees(bounds.high[joint]):.2f}°")
-    return law.along(rows, space.limits, space.rate_hz, label=label).arrays
+    # WHY the space's dynamics handed on: the torque-limited mode reads the model; the kinematic mode is never handed it
+    return law.along(rows, space.limits, space.rate_hz, label=label, dynamics=space.dynamics).arrays

@@ -22,14 +22,30 @@ Then the whole profile is slowed uniformly, by the least factor >= 1 that (a) pu
 points; between them the spline's curvature can push a joint a little over), and (c) honours ``law.move_s`` /
 ``law.min_move_s`` as a floor. Slowing by c divides velocities by c and accelerations by c^2, so it never breaks a limit.
 
-``law.options``: ``acceleration_fraction`` (of the stated limit, default 1) and ``grid_points`` (TOPP-RA's grid, default 200,
-the catalog row's number; the path's own points are always on it).
+``law.options``: ``acceleration_fraction`` (of the stated limit, default 1), ``grid_points`` (TOPP-RA's grid, default 200,
+the catalog row's number; the path's own points are always on it) and ``effort_fraction`` (the torque-limited mode, below).
+
+**Torque-limited mode** (``effort_fraction`` in (0, 1]): the space's dynamics model's torque stays within that fraction of
+``max_effort`` at every sample. ``needs(law)`` then names ``dynamics_model`` and ``torque_limits``, so the core hands the
+space's model in (``time_parameterize(..., dynamics=space.dynamics)``) or refuses with ``MissingRung`` first. TOPP-RA gets a
+``SecondOrderConstraint`` whose inverse dynamics is the model's own ``torque(q, qd, qdd)`` (or pin_utils'
+``inverse_dynamics``), with -limit <= tau <= limit. Two guarantees are made here rather than assumed:
+
+- **Inside the limit at every sample.** TOPP-RA reads the model by three probes and scales every velocity term with the
+  squared path speed: exact for rigid-body form, ``M(q) qdd + qd' C(q) qd + g(q)``, wrong for friction (viscous, Coulomb).
+  So each re-timing adds, as the constraint's ``custom_term``, what the model's torque is beyond that reading at the speeds
+  the last timing ran (``_mismatch``: a sequential linearisation, zero for a rigid-body model). The model's torque is then
+  checked at every output sample; after ``EFFORT_SETTLE_TRIES`` the bound is also tightened by any measured excess (between
+  grid points, the slow-down). ``EFFORT_TRIES`` at most, then refused by name. On lane B's CAN 11 stand-in it settles in
+  one to four tries (measured 2026-11-18).
+- **Never faster than the kinematic timing.** A torque bound only removes options, so its TOPP-RA optimum is never shorter;
+  but the uniform slow-down for between-grid peaks is not monotone, so the kinematic duration is also a floor. When the
+  kinematic timing already keeps the torque inside the limit, it is the answer, sample for sample.
+
+Holding still somewhere on the path already over the limit (gravity alone) is refused, naming the point.
 
 Refused (``can_service``): a start or end that moves (this backend times rest to rest; minimum-jerk's quintic or Ruckig
-serve moving boundaries), an unknown option, and **the torque-limited mode**: TOPP-RA can bound joint torques
-(``JointTorqueConstraint`` / ``SecondOrderConstraint(inv_dyn, ...)``), but that needs the space's inverse dynamics, and the
-time-law seam hands a backend only the path, the JointLimits (``max_effort`` included), the rate and the law, never the
-space. That is a core change (``NEEDED_CORE_CHANGE``), proposed, not worked around.
+serve moving boundaries), and an unknown or out-of-range option.
 """
 
 from __future__ import annotations
@@ -50,17 +66,12 @@ with warnings.catch_warnings():  # WHY: toppra 0.6.11's docstrings hold invalid 
     import toppra.constraint
 
 NAME = "toppra"
-OPTIONS = ("acceleration_fraction", "grid_points")
-TORQUE_WORDS = ("torque", "effort", "dynamics", "inverse_dynamics", "max_effort")
+OPTIONS = ("acceleration_fraction", "grid_points", "effort_fraction")
 GRID_POINTS = 200  # WHY 200: the catalog row time_optimal_path's own default
 CHECK_PER_INTERVAL = 8  # samples per TOPP-RA interval on the limit check (both ends of each interval included)
-NEEDED_CORE_CHANGE = (
-    "the time-law seam passes a backend (path_points, limits, rate_hz, law, start_state, end_state) and never the JointSpace, "
-    "so a backend cannot read space.dynamics. Proposed (a barrier, core files time_law.py + the path kinds): TimeLaw.leg / "
-    "TimeLaw.along take dynamics= (or space=), _by_backend passes it to time_parameterize as a keyword when the backend's "
-    "needs name dynamics_model, and refuses with MissingRung('dynamics_model') when the space has none; the kinds that time "
-    "paths (legs_through, cartesian.follow, joint_waypoints, cartesian_path, time_optimal_path) pass space.dynamics. The "
-    "torque bound itself is already handed in: JointLimits.max_effort")
+EFFORT_TRIES = 12  # WHY 12: the CAN 11 stand-in (Coulomb + viscous) settles in two to five; the rest is headroom
+EFFORT_SETTLE_TRIES = 2  # tries that only re-linearise (the mismatch) before the bound is also tightened by the measured excess
+EFFORT_STEP_MARGIN = 0.05  # tighten 5 % past the measured excess, so the next try lands inside rather than on the limit
 
 logging.getLogger("toppra").setLevel(logging.ERROR)  # WHY: toppra logs every solve at INFO/WARNING; refusals here say why
 
@@ -69,7 +80,12 @@ class ToppraBackend:
     """The time law ``toppra``: time-optimal along a fixed joint path under velocity and acceleration limits, rest to rest."""
 
     name = NAME
-    needs = ("velocity_limits", "acceleration_limits")
+
+    def needs(self, law: Any) -> tuple[str, ...]:
+        """Velocity and acceleration limits; in the torque-limited mode (``effort_fraction``) also the torque limits and the
+        space's dynamics model (the core hands it in, or refuses with ``MissingRung``)."""
+        kinematic = ("velocity_limits", "acceleration_limits")
+        return (*kinematic, "torque_limits", "dynamics_model") if torque_limited(law) else kinematic
 
     # ------------------------------------------------------------------ the seam
 
@@ -87,12 +103,12 @@ class ToppraBackend:
         return ""
 
     def time_parameterize(self, path_points: Any, limits: JointLimits, rate_hz: float, law: Any, *, start_state: Any = None,
-                          end_state: Any = None) -> JointTrajectory:
+                          end_state: Any = None, dynamics: Any = None) -> JointTrajectory:
         refusal = self.can_service(path_points, limits, law, start_state, end_state)
         if refusal:
             raise ValueError(refusal)
         path = np.asarray(path_points, float)
-        t, q, qd, qdd, progress = time_optimal(path, limits, rate_hz, law)
+        t, q, qd, qdd, progress = time_optimal(path, limits, rate_hz, law, dynamics=dynamics)
         outside = _position_violation(q, limits)
         if outside:
             raise ValueError(f"the spline through the path points leaves the position limits ({outside}); add points where the "
@@ -107,10 +123,6 @@ class ToppraBackend:
 def settings(limits: JointLimits, law: Any) -> dict[str, Any]:
     """TOPP-RA's limits and grid from the JointLimits handed in and the law's options, or a ValueError saying why not."""
     options = dict(law.options) if law is not None else {}
-    torque = sorted(key for key in options if any(word in key for word in TORQUE_WORDS))
-    if torque:
-        raise ValueError(f"TOPP-RA's torque-limited mode ({torque}) is not served: it needs the space's dynamics, a core change: "
-                         f"{NEEDED_CORE_CHANGE}")
     unknown = sorted(set(options) - set(OPTIONS))
     if unknown:
         raise ValueError(f"time law 'toppra' has no option {unknown} (it takes {OPTIONS})")
@@ -124,19 +136,126 @@ def settings(limits: JointLimits, law: Any) -> dict[str, Any]:
     velocity, acceleration = _finite_positive(limits.max_velocity, dof), _finite_positive(limits.max_acceleration, dof)
     if velocity is None or acceleration is None:
         raise ValueError("time law 'toppra' needs finite, positive max_velocity and max_acceleration in the JointLimits")
-    return {"max_velocity": velocity, "max_acceleration": acceleration * fraction, "grid_points": int(grid)}
+    effort_limit = None
+    if "effort_fraction" in options:
+        effort = options["effort_fraction"]
+        if isinstance(effort, bool) or not isinstance(effort, (int, float, np.integer, np.floating)) or not 0.0 < effort <= 1.0:
+            raise ValueError(f"time law 'toppra': effort_fraction must lie in (0, 1], got {effort!r}")
+        max_effort = _finite_positive(limits.max_effort, dof)
+        if max_effort is None:
+            raise ValueError("time law 'toppra': effort_fraction needs a finite, positive max_effort in the JointLimits")
+        effort_limit = max_effort * float(effort)
+    return {"max_velocity": velocity, "max_acceleration": acceleration * fraction, "grid_points": int(grid),
+            "effort_limit": effort_limit}
 
 
-def time_optimal(path: np.ndarray, limits: JointLimits, rate_hz: float, law: Any) -> tuple[np.ndarray, ...]:
-    """(t, q, qd, qdd, progress) along ``path`` (M, J), rest to rest, sampled at ``rate_hz`` from t = 0; progress = s, 0..M-1."""
+def torque_limited(law: Any) -> bool:
+    """Whether the law asks for the torque-limited mode (an ``effort_fraction`` option)."""
+    return law is not None and "effort_fraction" in dict(law.options)
+
+
+def time_optimal(path: np.ndarray, limits: JointLimits, rate_hz: float, law: Any, *, dynamics: Any = None) -> tuple[np.ndarray, ...]:
+    """(t, q, qd, qdd, progress) along ``path`` (M, J), rest to rest, sampled at ``rate_hz`` from t = 0; progress = s, 0..M-1.
+    In the torque-limited mode (``effort_fraction``), ``dynamics`` is the space's model (the module docstring)."""
     values = settings(limits, law)
     count, dof = path.shape
     floor = max(float(law.min_move_s), float(law.move_s or 0.0)) if law is not None else 0.1
+    limit = values["effort_limit"]
+    torque = None if limit is None else torque_of(dynamics)
+    if limit is not None:
+        _refuse_static_overload(path, torque, limit, limits.joint_names)
     if float(np.max(np.abs(path - path[0]))) <= 1e-12:  # nowhere to go: a hold of the floor's length
         steps = max(2, int(math.ceil(floor * rate_hz - 1e-9)))
         zeros = np.zeros((steps + 1, dof))
         return (np.arange(steps + 1) / rate_hz, np.tile(path[0], (steps + 1, 1)), zeros, zeros.copy(),
                 np.linspace(0.0, count - 1.0, steps + 1))
+    kinematic, profile = _solve(path, values, rate_hz, floor)
+    if limit is None:
+        return kinematic
+    excess = _effort_excess(kinematic, torque, limit)
+    if np.all(excess <= 0.0):
+        return kinematic  # WHY: the torque bound does not bind along this path, so the kinematic optimum is the answer
+    # WHY the kinematic duration as a floor: a torque bound only removes options, so the result is never faster than it
+    at_least = max(floor, float(kinematic[0][-1]))
+    bound = limit.copy()
+    for attempt in range(EFFORT_TRIES):
+        # WHY the mismatch at the last speed profile: TOPP-RA scales every velocity term of the model with the squared path
+        # speed (exact for rigid-body terms, wrong for friction); adding what the model says beyond that, at the speeds the last
+        # timing ran, makes TOPP-RA's torque the model's own near that timing (sequential linearisation)
+        mismatch = _mismatch(torque, *profile)
+        try:
+            timed, profile = _solve(path, values, rate_hz, at_least, effort=(torque, bound, mismatch))
+        except ValueError as error:
+            raise ValueError(f"TOPP-RA found no timing along this path that keeps the model's torque within effort_fraction x "
+                             f"max_effort = {np.round(limit, 4).tolist()} N·m ({error}); near where the path turns against gravity "
+                             "the model's friction leaves too little torque: raise effort_fraction or max_effort, or move the "
+                             "path") from error
+        excess = _effort_excess(timed, torque, limit)
+        if np.all(excess <= 0.0):
+            return timed
+        if attempt >= EFFORT_SETTLE_TRIES:
+            # WHY tightened by what the model measured: what remains is between grid points and from the slow-down
+            bound = bound - np.maximum(excess, 0.0) * (1.0 + EFFORT_STEP_MARGIN)
+            if np.any(bound <= 0.0):
+                break
+    joint = int(np.argmax(excess / limit))
+    raise ValueError(f"TOPP-RA could not keep the model's torque on {limits.joint_names[joint]} within {limit[joint]:.4f} N·m "
+                     f"(effort_fraction x max_effort) along this path in {EFFORT_TRIES} tries (still {excess[joint]:.4f} N·m "
+                     "over): the model is far from TOPP-RA's form along it, or the bound is too tight")
+
+
+def _mismatch(torque: Any, spline: Any, grid: np.ndarray, speed: np.ndarray) -> np.ndarray:
+    """(G, J): at each grid point, the model's torque at path speed ``speed`` (path acceleration 0) minus what TOPP-RA's
+    SecondOrderConstraint reads from the model's three probes (c = tau(q, 0, 0), b = tau(q, q', q'') - c, so b sd^2 + c).
+    Zero for a rigid-body model; the friction terms for the rest."""
+    q, slope, curvature = spline(grid), spline(grid, 1), spline(grid, 2)
+    zeros = np.zeros(q.shape[1])
+    rows = []
+    for point, tangent, bend, path_speed in zip(q, slope, curvature, speed, strict=True):
+        at_rest = torque(point, zeros, zeros)
+        read = (torque(point, tangent, bend) - at_rest) * path_speed**2 + at_rest
+        rows.append(torque(point, tangent * path_speed, bend * path_speed**2) - read)
+    return np.array(rows)
+
+
+def torque_of(dynamics: Any) -> Any:
+    """The model's inverse dynamics as ``tau(q, qd, qdd) -> (J,)``: its ``torque`` (or pin_utils' ``inverse_dynamics``)."""
+    function = getattr(dynamics, "torque", None) or getattr(dynamics, "inverse_dynamics", None)
+    if not callable(function):
+        raise ValueError("time law 'toppra' with effort_fraction needs the space's dynamics, a model with torque(q, qd, qdd) "
+                         "(the core hands it in as dynamics=space.dynamics)")
+
+    def tau(q: Any, qd: Any, qdd: Any) -> np.ndarray:
+        return np.asarray(function(np.asarray(q, float), np.asarray(qd, float), np.asarray(qdd, float)), float).reshape(-1)
+
+    return tau
+
+
+def _refuse_static_overload(path: np.ndarray, torque: Any, limit: np.ndarray, joint_names: Any) -> None:
+    """Holding still at some path point already needs more than the limit (gravity alone): no timing can help, say where."""
+    zeros = np.zeros(path.shape[1])
+    static = np.array([np.abs(torque(point, zeros, zeros)) for point in path])
+    point, joint = np.unravel_index(int(np.argmax(static / limit)), static.shape)
+    if static[point, joint] > limit[joint]:
+        raise ValueError(f"holding still at path point {point} already needs {static[point, joint]:.4f} N·m on "
+                         f"{joint_names[joint]}, over effort_fraction x max_effort = {limit[joint]:.4f} N·m: no timing keeps the "
+                         "torque inside it")
+
+
+def _effort_excess(timed: tuple[np.ndarray, ...], torque: Any, limit: np.ndarray) -> np.ndarray:
+    """Per joint, the model's worst |torque| over every output sample minus the limit (<= 0 everywhere: inside it)."""
+    _, q, qd, qdd, _ = timed
+    worst = np.max(np.abs(np.array([torque(*state) for state in zip(q, qd, qdd, strict=True)])), axis=0)
+    return worst - limit
+
+
+def _solve(path: np.ndarray, values: dict[str, Any], rate_hz: float, floor: float,
+           effort: tuple[Any, np.ndarray, np.ndarray] | None = None) -> tuple[tuple[np.ndarray, ...], tuple[Any, ...]]:
+    """TOPP-RA along ``path`` under the velocity and acceleration limits (and, with ``effort`` = (tau, bound, mismatch),
+    -bound <= tau + mismatch <= bound by a SecondOrderConstraint on the model's inverse dynamics, ``mismatch`` (G, J) its
+    custom term on the grid), sampled at the rate, at least ``floor`` long. Returns the samples (t, q, qd, qdd, progress) and
+    the profile (spline, grid, path speed on the grid as sampled) the next mismatch is read at."""
+    count, dof = path.shape
     # WHY s scaled to a rough duration, not the point index: toppra's solvers cap the squared path speed and the path
     # acceleration at 1e4 (toppra.constants MAXX, MAXU), so an index-scaled s (path speed in the hundreds of points per second)
     # is reported uncontrollable even on a straight line. With s ~ seconds both stay O(1/T).
@@ -149,11 +268,27 @@ def time_optimal(path: np.ndarray, limits: JointLimits, rate_hz: float, law: Any
     velocity = toppra.constraint.JointVelocityConstraint(values["max_velocity"])
     acceleration = toppra.constraint.JointAccelerationConstraint(
         values["max_acceleration"], discretization_scheme=toppra.constraint.DiscretizationType.Interpolation)
-    instance = toppra.algorithm.TOPPRA([velocity, acceleration], spline, gridpoints=grid, solver_wrapper="seidel")
+    constraints = [velocity, acceleration]
+    if effort is not None:
+        tau, bound, mismatch = effort
+        both_ways = np.vstack([np.eye(dof), -np.eye(dof)])  # F w <= g with w = tau: tau <= bound and -tau <= bound
+        limit_g = np.concatenate([bound, bound])
+
+        def beyond_form(_path: Any, s: float) -> np.ndarray:  # TOPP-RA calls it at each grid point (``_mismatch``)
+            return np.array([np.interp(s, grid, mismatch[:, joint]) for joint in range(dof)])
+
+        # WHY the model's own inverse dynamics, not a fitted M, C, g: the model is injected by shape (torque(q, qd, qdd)), and
+        # TOPP-RA reads a, b, c from it by its three probes; what those miss (friction) comes in as the custom term
+        constraints.append(toppra.constraint.SecondOrderConstraint(
+            tau, lambda _q: both_ways, lambda _q: limit_g, dof, custom_term=beyond_form,
+            discretization_scheme=toppra.constraint.DiscretizationType.Interpolation))
+    instance = toppra.algorithm.TOPPRA(constraints, spline, gridpoints=grid, solver_wrapper="seidel")
     instance.compute_parameterization(0.0, 0.0)
     data = instance.problem_data
     if data.return_code != toppra.algorithm.ParameterizationReturnCode.Ok or data.sd_vec is None:
-        raise ValueError(f"TOPP-RA could not time this path ({data.return_code}): the limits admit no rest-to-rest timing along it")
+        within = " and the torque bound" if effort is not None else ""
+        raise ValueError(f"TOPP-RA could not time this path ({data.return_code}): the limits{within} admit no rest-to-rest timing "
+                         "along it")
     s_grid = np.asarray(data.gridpoints, float).reshape(-1)
     sd = np.maximum(np.asarray(data.sd_vec, float).reshape(-1), 0.0)
     sd[0] = sd[-1] = 0.0  # WHY exact: rest to rest is the request; the solver returns ~1e-12 at the ends
@@ -200,7 +335,7 @@ def time_optimal(path: np.ndarray, limits: JointLimits, rate_hz: float, law: Any
     progress[0], progress[-1] = 0.0, count - 1.0
     q[0], q[-1] = path[0], path[-1]
     qd[0] = qd[-1] = 0.0
-    return t, q, qd, qdd, progress
+    return (t, q, qd, qdd, progress), (spline, s_grid, sd / scale)
 
 
 def _at_rest(state: Any) -> bool:
@@ -229,4 +364,4 @@ def _position_violation(q: np.ndarray, limits: JointLimits) -> str:
     return ""
 
 
-__all__ = ["NAME", "NEEDED_CORE_CHANGE", "OPTIONS", "ToppraBackend", "settings", "time_optimal"]
+__all__ = ["NAME", "OPTIONS", "ToppraBackend", "settings", "time_optimal", "torque_limited", "torque_of"]

@@ -23,7 +23,8 @@ def moving_pick_and_place(space, target=None, place=None, *, lift_m=0.05, up=(0.
     """``pick_and_place``'s U where the first point moves: approach above it, down onto it, dwell on it, up off it, over to
     above the second point, down, dwell, up. ``lift_m`` along ``up`` (base frame); the tool keeps its start orientation.
 
-    - ``target``: the first point, as ``moving_target_track`` takes it (a mapping of LinearMotion's fields, or a fixed point);
+    - ``target``: the first point, as ``moving_target_track`` takes it (a LinearMotion or a mapping of its fields, a
+      PoseTrajectory, or a fixed point);
       ``place``: the second point (xyz, m), fixed. None: defaults from the space: the first point ``lift_m`` below the tool's
       start point at ``sync_start_s``, moving level at 5 cm/s; the second ``lift_m`` below it and 5 cm back along that line.
     - Down, dwell and up chase the first point (bam_traj_gen's ``sync_speed > 0``; ``TargetWaypoint(sync="chase")``): the tool

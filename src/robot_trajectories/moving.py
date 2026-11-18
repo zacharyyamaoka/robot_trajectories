@@ -15,6 +15,11 @@ producers (an encoder-driven belt, a vision tracker's prediction) build it.
 | ``window = (enter, leave)`` | the times between which it may be met; a plan outside it is refused | none (reach-limited only) |
 | ``assumes`` | the motion model the prediction relies on, in words ("constant velocity 0.25 m/s along +y") | implicit |
 
+**As text**: a recipe is JSON, so a kind's ``target=`` is recorded by its data form (``target_record``, tagged
+``moving_target``): a ``LinearMotion``'s fields, or a ``PoseTrajectory`` in robot_msgs' own ``to_dict`` encoding. Both rebuild
+the identical object (``target_from_record``), so ``rebuild()`` makes the identical samples. A bare callable has no data form
+and is refused by the recipe, naming ``LinearMotion``.
+
 **Which waypoints chase it**: a ``TargetWaypoint`` is a pose in the target's frame plus ``sync``: ``"chase"`` (composed with
 ``target(t)`` at its own arrival time: it moves with the target), ``"inherit"`` (keeps the offset reached at the sync point
 but stops chasing: a leg after contact), ``"fixed"`` (in the base frame). bam_traj_gen's ``ArmParams`` (waypoint_action.py:223)
@@ -40,7 +45,7 @@ can check the assumption against the encoder.
 from __future__ import annotations
 
 import math
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol
 
@@ -55,6 +60,8 @@ CANNOT_CATCH = "cannot_catch"
 SYNC_NOT_CONVERGED = "sync_not_converged"
 CAUSES = ("target_outruns_arm", "residual_grows", "intercept_out_of_reach", "time_law_error", "target_leaves_window")
 Sync = Literal["chase", "inherit", "fixed"]
+TARGET_TAG = "moving_target"  # the key a moving target's data form is tagged with in a recipe ({"moving_target": "LinearMotion", ...})
+DATA_FORMS = ("LinearMotion", "PoseTrajectory")  # the moving targets a recipe can write as text, and rebuild
 
 
 class MovingTarget(Protocol):
@@ -138,6 +145,26 @@ class LinearMotion:
     def velocity(self, t: float) -> np.ndarray:
         return np.concatenate([np.asarray(self.direction) * self.speed, np.zeros(3)])
 
+    def to_record(self) -> dict[str, Any]:
+        """Its data form, as a recipe keeps it: every field (defaults written out) under the tag ``moving_target``."""
+        return {TARGET_TAG: "LinearMotion", "pose": [[float(v) for v in row] for row in self.pose],
+                "direction": [float(v) for v in self.direction], "speed": float(self.speed), "stamp": float(self.stamp),
+                "latency_s": float(self.latency_s), "window": [float(v) for v in self.window]}
+
+    @classmethod
+    def from_record(cls, record: Mapping[str, Any]) -> LinearMotion:
+        """The LinearMotion ``to_record`` wrote, field for field: the same object, so a rebuilt recipe makes the same samples."""
+        fields = {key: value for key, value in record.items() if key != TARGET_TAG}
+        motion = cls(fields["pose"], tuple(fields["direction"]), float(fields["speed"]), stamp=float(fields.get("stamp", 0.0)),
+                     latency_s=float(fields.get("latency_s", 0.0)), window=tuple(float(v) for v in fields.get("window", (-math.inf, math.inf))))
+        stored = tuple(float(v) for v in fields["direction"])
+        if motion.speed > 0 and abs(math.hypot(*stored) - 1.0) > 1e-9:
+            raise ValueError(f"a recorded LinearMotion's direction is a unit vector; {stored} is not")
+        # WHY the stored direction put back: it was normalised when the target was first made, and normalising it again moves
+        # its last bit in about a third of cases (measured 2026-11-18), which would make rebuild() a different trajectory
+        object.__setattr__(motion, "direction", stored)
+        return motion
+
 
 @dataclass(frozen=True)
 class _Adapted:
@@ -184,6 +211,42 @@ def as_moving_target(target: Any) -> MovingTarget:
         return _Adapted(target)
     fixed = _as_pose(target)
     return _Adapted(lambda t: fixed, assumes="a fixed pose")
+
+
+# ====================================================================== a moving target as text (what a recipe keeps)
+
+
+def has_data_form(value: Any) -> bool:
+    """Whether a recipe can write ``value`` out as a moving target and rebuild it: a LinearMotion or a robot_msgs PoseTrajectory."""
+    return isinstance(value, (LinearMotion, PoseTrajectory))
+
+
+def target_record(target: Any) -> dict[str, Any]:
+    """A moving target's data form, tagged ``moving_target``: a LinearMotion's fields, or a PoseTrajectory in robot_msgs' own
+    dict encoding (``to_dict``: every sample, dtype and shape kept). A function of time has none, and is refused.
+
+    WHY only these two: a recipe must rebuild the identical target from text, and a callable is code, not data."""
+    if isinstance(target, LinearMotion):
+        return target.to_record()
+    if isinstance(target, PoseTrajectory):
+        return {TARGET_TAG: "PoseTrajectory", "trajectory": target.to_dict()}
+    raise TypeError(f"{target!r} has no data form: a recipe keeps a moving target as a LinearMotion (constant velocity; "
+                    "LinearMotion.from_sync(pose, sync_dir, sync_speed)) or a robot_msgs PoseTrajectory (sampled poses), "
+                    "never a function of time")
+
+
+def is_target_record(value: Any) -> bool:
+    return isinstance(value, Mapping) and TARGET_TAG in value
+
+
+def target_from_record(record: Mapping[str, Any]) -> LinearMotion | PoseTrajectory:
+    """The moving target ``target_record`` wrote: identical, so the kind that reads it makes the identical samples again."""
+    form = record[TARGET_TAG]
+    if form == "LinearMotion":
+        return LinearMotion.from_record(record)
+    if form == "PoseTrajectory":
+        return PoseTrajectory.from_dict(record["trajectory"])
+    raise ValueError(f"a moving target recorded as {form!r}: this version reads {DATA_FORMS}")
 
 
 @dataclass(frozen=True)
@@ -252,5 +315,6 @@ def synchronised(space: JointSpace, trajectory: JointTrajectory, target: Any, *,
                       len(window), "; ".join(why))
 
 
-__all__ = ["CANNOT_CATCH", "CAUSES", "CannotCatch", "LinearMotion", "MovingTarget", "SYNC_NOT_CONVERGED", "SyncReport", "TargetWaypoint",
-           "as_moving_target", "synchronised"]
+__all__ = ["CANNOT_CATCH", "CAUSES", "CannotCatch", "DATA_FORMS", "LinearMotion", "MovingTarget", "SYNC_NOT_CONVERGED", "SyncReport",
+           "TARGET_TAG", "TargetWaypoint", "as_moving_target", "has_data_form", "is_target_record", "synchronised", "target_from_record",
+           "target_record"]

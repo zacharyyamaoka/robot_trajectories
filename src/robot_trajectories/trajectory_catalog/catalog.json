@@ -2,7 +2,7 @@
   "schema": "trajectory_catalog/1",
   "generated_by": "robot_trajectories/trajectory_catalog/make_json.py from catalog.py (do not edit)",
   "counts": {
-    "kinds": 68,
+    "kinds": 69,
     "by_family": {
       "excitation": 14,
       "controller_test": 5,
@@ -12,33 +12,33 @@
       "standard_test": 5,
       "calibration": 5,
       "stress": 4,
-      "task_cycle": 7,
+      "task_cycle": 8,
       "hold": 3
     },
     "by_priority": {
       "now": 9,
-      "next": 36,
+      "next": 37,
       "later": 23
     },
     "by_output": {
-      "joint_trajectory": 51,
+      "joint_trajectory": 52,
       "torque_profile": 4,
       "command_sequence": 6,
       "pose_set": 7
     },
     "by_starts_as": {
       "time_signal": 30,
-      "path": 38
+      "path": 39
     },
     "by_dimension": {
-      "1D": 34,
-      "2D": 32,
-      "3D": 30,
-      "6D": 32
+      "1D": 35,
+      "2D": 33,
+      "3D": 31,
+      "6D": 33
     },
     "by_entry_level": {
       "joint_limits": 37,
-      "kinematics": 20,
+      "kinematics": 21,
       "dynamics": 3,
       "torque_limits": 8
     }
@@ -120,7 +120,8 @@
     "joins": [
       "starts_and_ends_at_rest",
       "periodic_returns_to_start",
-      "ends_anywhere"
+      "ends_anywhere",
+      "ends_moving"
     ],
     "priorities": [
       "now",
@@ -4191,6 +4192,61 @@
       "prior_art": [],
       "priority": "next",
       "notes": "Zach 11-18: 'You can account for like trajectory points that are moving'. Contract and ruler: robot_trajectories.moving (synchronised). bam_grasp's conveyor leads the target by 0.25 s to cancel servo lag.",
+      "dimensions": [
+        "1D",
+        "2D",
+        "3D",
+        "6D"
+      ],
+      "joint_trajectory": true,
+      "defined_in": "cartesian",
+      "entry_level": "kinematics",
+      "entry_extras": []
+    },
+    {
+      "id": "meet_moving_point",
+      "name": "Meet a moving point, end moving with it",
+      "family": "task_cycle",
+      "one_line": "From rest, meet a point that moves at the sync time with its velocity matched and stay on it to the end of the sync window, ending there in motion with it: the first half of a moving-target cycle (track_and_release is the second).",
+      "use_cases": [
+        "tracking_eval",
+        "conveyor_pick_and_place"
+      ],
+      "space": "cartesian",
+      "starts_as": "path",
+      "scope": "cartesian_path",
+      "output": "joint_trajectory",
+      "needs": [
+        "joint_limits",
+        "velocity_limits",
+        "acceleration_limits",
+        "forward_kinematics",
+        "inverse_kinematics"
+      ],
+      "parameters": [
+        {
+          "name": "sync_start_s",
+          "unit": "s",
+          "default": 1.0
+        },
+        {
+          "name": "sync_end_s",
+          "unit": "s",
+          "default": 1.3
+        },
+        {
+          "name": "tolerance_m",
+          "unit": "m",
+          "default": 0.0001
+        }
+      ],
+      "segments_join": "ends_moving",
+      "exists_in": [
+        "src/core/mdp/agent/actor/policy/bam_grasp/src/bam_grasp/conveyor.py:72"
+      ],
+      "prior_art": [],
+      "priority": "next",
+      "notes": "Added 2026-11-18, promoted from lane F's test stand-in: no row ended moving at a target, so track_and_release had nothing in the catalog to follow. chain refuses a follower that does not start in its exact end state.",
       "dimensions": [
         "1D",
         "2D",

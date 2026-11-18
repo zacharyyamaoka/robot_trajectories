@@ -33,4 +33,4 @@ def move(space, joint=None, *, targets_fraction=(0.5, -0.5), time_law=TimeLaw.mi
         rows.append(row)
     if back_to_start:
         rows.append(start.copy())
-    return legs_through(start, rows, time_law, space.limits, space.rate_hz, dwell_s=dwell_s, label=label)
+    return legs_through(start, rows, time_law, space.limits, space.rate_hz, dwell_s=dwell_s, label=label, dynamics=space.dynamics)

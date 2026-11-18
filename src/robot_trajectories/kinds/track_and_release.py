@@ -15,7 +15,7 @@ def track_and_release(space, target=None, *, dwell_s=0.3, leave_m=0.05, leave_di
                       time_law=TimeLaw.minimum_jerk(peak_speed_fraction=0.3), tolerance_m=1e-4, label="track, then leave",
                       start=None):
     """The second half of a moving-target cycle: already moving with a point (``start`` is the state a trajectory ends in,
-    moving: pass that trajectory), keep the tool where it is in the point's frame for ``dwell_s``, then leave ``leave_m``
+    moving: pass that trajectory, e.g. ``meet_moving_point``'s, the first half), keep the tool where it is in the point's frame for ``dwell_s``, then leave ``leave_m``
     along ``leave_direction`` (base frame; on a planar robot its plane's up) while braking to rest.
 
     - ``target``: as ``moving_target_track`` takes it, or None: the tool's own motion at the start, extrapolated at constant
