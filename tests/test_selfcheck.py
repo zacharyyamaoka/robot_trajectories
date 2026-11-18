@@ -31,7 +31,7 @@ def claims() -> tuple[tuple[bool, str], ...]:
     def claim(ok: bool, text: str) -> None:
         results.append((bool(ok), text))
 
-    def inside(trajectory, limits) -> str:
+    def inside(trajectory, limits, info=None) -> str:
         q, qd, qdd = trajectory.positions, trajectory.velocities, trajectory.accelerations
         problems = []
         if np.any(q < limits.min_position - 1e-9) or np.any(q > limits.max_position + 1e-9):
@@ -43,7 +43,11 @@ def claims() -> tuple[tuple[bool, str], ...]:
         dt = np.diff(trajectory.t)[:, None]
         if np.any(np.abs(np.diff(qd, axis=0)) > limits.max_acceleration * dt * 1.05 + 1e-9):
             problems.append("velocity jump")
-        if np.max(np.abs(qd[[0, -1]])) > 1e-6:
+        # WHY per end (2026-11-18, lanes A-F): a kind may declare a moving start/end (a synchronised hand-over) or an
+        # event-ended finish (ends="anywhere"); only the ends it declares at rest are held to rest here.
+        rest_ends = [index for index, declared in ((0, getattr(info, "starts", "at_rest")), (-1, getattr(info, "ends", "at_rest")))
+                     if declared == "at_rest"]
+        if rest_ends and np.max(np.abs(qd[rest_ends])) > 1e-6:
             problems.append("not at rest at the ends")
         return ", ".join(problems)
 
@@ -76,10 +80,15 @@ def claims() -> tuple[tuple[bool, str], ...]:
                 options = {"margin_rad": 0.0, "margin_fraction": 0.05}  # its hole-free box is 6.3° wide: no 5° margins
             try:
                 trajectory = info.function(space, *arguments, **options)
+            except MissingRung as error:
+                # WHY (2026-11-18): a kind that needs a rung the plain robot lacks (kinematics, dynamics, torque limits, a
+                # named home) must refuse and name the call that adds it; its motion is tested in its lane's own file.
+                claim(any(word in str(error) for word in ("with_", "Add it", "pass ", "Pass ")), f"{robot}: {name} is refused for a missing input, naming the fix")
+                continue
             except ValueError as error:
                 claim(False, f"{robot}: {name} generates ({error})")
                 continue
-            problem = inside(trajectory, space.limits)
+            problem = inside(trajectory, space.limits, info)
             if robot == "five-bar" and not problem:
                 off = [q for q in trajectory.positions[::5] if (p := robots.fivebar_passive(*q)) is None or p[2] < 0.2]
                 problem = f"leaves the reachable set at {len(off)} samples" if off else ""
