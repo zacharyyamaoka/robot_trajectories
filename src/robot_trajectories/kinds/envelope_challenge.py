@@ -15,7 +15,7 @@ from .velocity_sweep import velocity_sweep
       starts_as="time_signal", dimensions=("1D",), unchecked=("collision_model",), higher_order=True)
 def envelope_challenge(space, joint=None, *, sweep_speeds=(0.1, 0.5), sweep_span=0.95, ladder_rungs=(0.2, 0.4, 0.6, 0.8, 1.0),
                        ladder_repeats=2, ladder_held_out=1, random_moves=10, random_speed=0.8, seed=0, coverage_pct=60.0,
-                       coverage_max_s=90.0, chirp_hz=(0.5, 2.0), chirp_s=15.0, settle_s=1.0, start=None):
+                       coverage_max_s=90.0, chirp_hz=(0.5, 2.0), chirp_s=15.0, settle_s=1.0, home_between=False, start=None):
     """How does one joint track across its whole envelope? Position, speed and acceleration each pushed to the limits the
     space states, in one session that starts and ends at home:
 
@@ -27,6 +27,9 @@ def envelope_challenge(space, joint=None, *, sweep_speeds=(0.1, 0.5), sweep_span
     5. a constant-speed linear chirp over ``chirp_hz`` around home: the frequency response;
     6. home.
 
+    ``home_between``: end every part at home (a minimum-jerk move back after the sweep, the ladder, the moves and the swings), so a
+    player that releases the joint between rest-to-rest pieces leaves it where it rests by itself.
+
     A higher-order kind: six lower kinds chained, recorded as this one call, so the call (its keyword arguments) is the
     configuration and the recipe rebuilds the session sample for sample.
 
@@ -37,14 +40,21 @@ def envelope_challenge(space, joint=None, *, sweep_speeds=(0.1, 0.5), sweep_span
     sweep = annotate(velocity_sweep(space, index, speeds_fraction=tuple(sweep_speeds), span_fraction=sweep_span, start=start),
                      f"slow passes across {100 * sweep_span:.0f} % of the room at {', '.join(f'{100 * s:.0f} %' for s in sweep_speeds)}"
                      " of top speed: gravity and friction torque at every angle")
+    # WHY home_between (2026-11-18, the first full-turn run on CAN 11): the rack runner STOPs the board between plan steps (its post-stop
+    # current read), so a pendulum left away from the bottom fell limp and swung +-75 deg; the next step's prelude caught it at 12.9 N.m and
+    # 6.97 rad/s, 93 % of the overspeed guard. Ending each part at home leaves nothing to fall.
+    def back(part):
+        return chain(part, home(space, start=part)) if home_between else part
+
+    sweep = back(sweep)
     settle_1 = hold(space, settle_s, start=sweep)
-    ladder = annotate(speed_ladder(space, index, rung_fractions=tuple(ladder_rungs), repeats=ladder_repeats, held_out=ladder_held_out,
-                                   start=settle_1),
-                      f"A <-> B across the room at {', '.join(f'{100 * r:.0f} %' for r in ladder_rungs)} of top speed: "
-                      "tracking and stops as speed rises")
+    ladder = back(annotate(speed_ladder(space, index, rung_fractions=tuple(ladder_rungs), repeats=ladder_repeats, held_out=ladder_held_out,
+                                        start=settle_1),
+                           f"A <-> B across the room at {', '.join(f'{100 * r:.0f} %' for r in ladder_rungs)} of top speed: "
+                           "tracking and stops as speed rises"))
     settle_2 = hold(space, settle_s, start=ladder)
-    moves = annotate(random_waypoints(space, random_moves, seed=seed, speed=random_speed, start=settle_2),
-                     f"{random_moves} seeded random moves (seed {seed}) at {100 * random_speed:.0f} %: ordinary motion anywhere")
+    moves = back(annotate(random_waypoints(space, random_moves, seed=seed, speed=random_speed, start=settle_2),
+                          f"{random_moves} seeded random moves (seed {seed}) at {100 * random_speed:.0f} %: ordinary motion anywhere"))
     settle_3 = hold(space, settle_s, start=moves)
     swings = annotate(coverage_greedy_swings(space, index, target_coverage_pct=coverage_pct, max_duration_s=coverage_max_s,
                                              start=settle_3),

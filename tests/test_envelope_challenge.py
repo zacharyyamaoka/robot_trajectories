@@ -84,5 +84,20 @@ def test_seed_changes_only_the_random_moves() -> None:
     assert a.t[-1] != b.t[-1] or not np.array_equal(a.positions, b.positions)
 
 
+def test_home_between_ends_every_part_at_home() -> None:
+    """With home_between, the motion before every hold (and the session's end) is at rest at home: a player that releases the joint at a
+    hold, or between the pieces a hold separates, leaves it where it rests by itself."""
+    space = full_turn()
+    trajectory = envelope_challenge(space, "j", home_between=True)
+    check_kind(trajectory, space)
+    entries = segment_info(trajectory)
+    segment = np.asarray(trajectory.channels["segment"]).astype(int)
+    for index, entry in enumerate(entries):
+        following = entries[index + 1]["call"]["kind"] if index + 1 < len(entries) else None
+        if entry["call"]["kind"] != "hold" and following in ("hold", None):
+            last = np.flatnonzero(segment == index)[-1]
+            assert abs(trajectory.positions[last, 0]) < 1e-9, (index, entry["call"]["kind"], trajectory.positions[last, 0])
+
+
 if __name__ == "__main__":
     raise SystemExit(_runner.run(globals(), __file__))
