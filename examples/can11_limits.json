@@ -1,0 +1,13 @@
+{
+ "name": "pendulum (CAN 11)",
+ "about": "The One Dof Test Rack's CAN 11 station as bare robot_msgs JointLimits: +/-0.33 rad about the gravity bottom, 2.0 rad/s, 7.3896 rad/s^2. Positions are relative to the origin (-0.373685 rad in the board frame), as sim2real's schedule writes them. Same values as tests/fixtures/robots.py PENDULUM_LIMITS (the round's fixture); tests/test_equivalence.py holds the two equal.",
+ "source": "/archive/datasets/bam_rig/schedules/one-dof-test-rack/can11/schedule.json",
+ "limits": {
+  "joint_names": ["can11"],
+  "min_position": [-0.33],
+  "max_position": [0.33],
+  "max_velocity": [2.0],
+  "max_acceleration": [7.3896],
+  "position_kind": ["software"]
+ }
+}

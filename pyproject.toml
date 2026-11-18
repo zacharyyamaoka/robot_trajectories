@@ -1,0 +1,33 @@
+[build-system]
+# WHY >=1.27: the first hatchling that writes PEP 639 metadata (robot_models' template, as robot_metrics).
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "robot-trajectories"
+version = "0.0.1"
+description = "Joint trajectories from what you have (joint limits, then kinematics, dynamics, torque limits): config records, purpose plans and a workspace in, robot_msgs JointTrajectories inside the limits out."
+readme = "README.md"
+authors = [{ name = "Zach Yamaoka" }]
+requires-python = ">=3.11"
+# WHY robot_msgs + numpy only (the leaf rule, the 2026-11-18 round's contract; Zach's "dependency-free runtime cores"):
+# a RobotDescription, a ReachMap, kinematics or a dynamics model enter by shape (joint_limits(), joint_solutions /
+# valid_mask, forward / inverse, inverse_dynamics), never by import, so sim2real, apps and rigs can all depend on this
+# package and it depends on none of them. tests/test_boundary.py enforces it.
+dependencies = ["robot-msgs>=0.3.0", "numpy>=1.26"]
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+[tool.uv.sources]
+# WHY absolute: robot_models and robot_metrics name it the same way (a consumer's lock took a relative source over, 2026-11-12).
+robot-msgs = { path = "/home/bam/robot_msgs", editable = true }
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/robot_trajectories"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 130
