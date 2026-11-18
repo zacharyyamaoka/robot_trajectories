@@ -10,7 +10,8 @@ exactly the use-case vocabulary; every kind has a use case and either code we ha
 torque-space kind is never a plain position JointTrajectory; catalog.json is what make_json.py writes now, and only ever adds keys
 to what the landing pages read. Paths vs trajectories (kind.py has the rules): every kind starts as a path or a time signal;
 joint-space dimensions follow the scope, Cartesian ones are a contiguous run; entry_level is the lowest rung of the input ladder that
-covers the needs, never higher. New here: the record classes that generate speak the same vocabulary as the rows they claim.
+covers the needs, never higher. The kinds that generate speak the same vocabulary as the rows they claim, and ``catalog()`` lists
+every row exactly once: implemented by a kind, or honestly marked not yet.
 """
 
 from __future__ import annotations
@@ -20,7 +21,7 @@ import os
 from pathlib import Path
 
 import _runner
-from robot_trajectories import catalog as registered_kinds
+from robot_trajectories import catalog, kinds
 from robot_trajectories.trajectory_catalog import JSON_PATH, make_json
 from robot_trajectories.trajectory_catalog import kind as vocabulary
 from robot_trajectories.trajectory_catalog.catalog import CATALOG, KINDS, USE_CASES
@@ -195,18 +196,34 @@ def test_catalog_json_only_adds_keys():
         assert LEGACY_ROW_KEYS | NEW_ROW_KEYS <= set(row), (row["id"], (LEGACY_ROW_KEYS | NEW_ROW_KEYS) - set(row))
 
 
-def test_record_classes_speak_the_catalog_vocabulary():
-    """Every record class that generates uses the catalog's tags, and agrees with the row it claims on family and starts_as.
-    WHY not use cases or entry level: the round's records keep their own tags (Chirp serves pid_tuning; WorkspaceSweep reads a
-    reach map with a box-grid fallback), and the catalog row stays what the sweep found."""
-    for kind in registered_kinds():
-        assert kind.family in vocabulary.FAMILIES, (kind.id, kind.family)
-        assert kind.starts_as in vocabulary.STARTS_AS, (kind.id, kind.starts_as)
-        assert set(kind.use_cases) <= set(vocabulary.USE_CASE_TAGS), (kind.id, set(kind.use_cases) - set(vocabulary.USE_CASE_TAGS))
-        assert set(kind.needs) <= set(vocabulary.NEEDS), (kind.id, set(kind.needs) - set(vocabulary.NEEDS))
-        if kind.catalog_id is not None:
-            row = KINDS[kind.catalog_id]
-            assert (kind.family, kind.starts_as) == (row.family, row.starts_as), (kind.id, row.id)
+def test_kinds_speak_the_catalog_vocabulary():
+    """Every kind that generates uses the catalog's tags, and agrees with the row it claims on family and starts_as.
+    WHY not use cases or entry level: a kind keeps its own tags (chirp serves pid_tuning; workspace_sweep reads a reach map
+    with a box-grid fallback), and the catalog row stays what the sweep found."""
+    for name, info in kinds().items():
+        assert info.family in vocabulary.FAMILIES, (name, info.family)
+        assert info.starts_as in vocabulary.STARTS_AS, (name, info.starts_as)
+        assert set(info.use_cases) <= set(vocabulary.USE_CASE_TAGS), (name, set(info.use_cases) - set(vocabulary.USE_CASE_TAGS))
+        assert set(info.needs) <= set(vocabulary.NEEDS), (name, set(info.needs) - set(vocabulary.NEEDS))
+        if info.catalog_id is not None:
+            row = KINDS[info.catalog_id]
+            assert (info.family, info.starts_as) == (row.family, row.starts_as), (name, row.id)
+
+
+def test_catalog_lists_every_row_once_honestly():
+    """``catalog()`` = the kinds that generate, then every row no kind claims, marked not implemented: nothing twice, nothing lost."""
+    listing = catalog()
+    claimed = {info.catalog_id for info in kinds().values() if info.catalog_id}
+    assert listing.implemented.names == list(kinds()), listing.implemented.names
+    assert sorted(entry.catalog_id for entry in listing.todo) == sorted(row.id for row in CATALOG if row.id not in claimed)
+    assert all(not entry.implemented for entry in listing.todo)
+    assert {entry.catalog_id for entry in listing.implemented if entry.catalog_id} == claimed
+
+
+def test_conveyor_use_case_finds_the_moving_target_rows():
+    names = catalog(use_case="conveyor_pick_and_place").names
+    for expected in ("pick_and_place", "moving_target_track", "track_and_release", "moving_pick_and_place", "touch_down_contact"):
+        assert expected in names, (expected, names)
 
 
 def main() -> int:

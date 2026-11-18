@@ -1,31 +1,19 @@
 from __future__ import annotations
 
 from .. import kernels as k
+from ..registry import kind
 
-from ..kind import Context, Kind, param
 
-
-class Hold(Kind):
-    """Hold the last target and read the settled stop from the hold's final window: the segment that joins two moves,
-    and the stop-accuracy reading itself."""
-
-    catalog_id = "hold_at_pose"
-    family = "hold"
-    use_cases = ("stop_accuracy", "pid_tuning", "repeatability", "smoke_test")
-    needs = ("joint_limits",)
-
-    duration_s: float = param(1.0, "s", "how long to stay (the catalog's hold_s)")
-    settle_window_s: float = param(0.3, "s", "the last stretch of the hold, where the settled stop is read (a band)")
-
-    def check(self) -> None:
-        if self.duration_s < 0 or self.settle_window_s < 0:
-            raise ValueError(f"Hold needs duration_s and settle_window_s >= 0, got {self.duration_s}, {self.settle_window_s}")
-
-    def pieces(self, context: Context) -> list[k.Arrays]:
-        window = min(self.settle_window_s, self.duration_s)
-        settle = self.duration_s - window
-        # WHY two pieces: the read window shows as its own band, so a scorer reads the stop where the catalog says to.
-        if window <= 0 or settle * context.rate_hz < 2:
-            return [k.hold(context.start, self.duration_s, context.rate_hz, label=self.display_label)]
-        return [k.hold(context.start, settle, context.rate_hz, label=self.display_label),
-                k.hold(context.start, window, context.rate_hz, label=f"{self.display_label}: settled-stop window")]
+@kind(use_cases=("stop_accuracy", "pid_tuning", "repeatability", "smoke_test"), needs=("joint_limits",), catalog_id="hold_at_pose")
+def hold(space, duration_s=1.0, *, settle_window_s=0.3, label="hold", start=None):
+    """Hold where it is and read the settled stop from the hold's final window: the segment that joins two moves, and the
+    stop-accuracy reading itself (the catalog's hold_s and settle window)."""
+    if duration_s < 0 or settle_window_s < 0:
+        raise ValueError(f"hold needs duration_s and settle_window_s >= 0, got {duration_s}, {settle_window_s}")
+    window = min(settle_window_s, duration_s)
+    settle = duration_s - window
+    # WHY two pieces: the read window shows as its own band, so a scorer reads the stop where the catalog says to.
+    if window <= 0 or settle * space.rate_hz < 2:
+        return [k.hold(start, duration_s, space.rate_hz, label=label)]
+    return [k.hold(start, settle, space.rate_hz, label=label),
+            k.hold(start, window, space.rate_hz, label=f"{label}: settled-stop window")]

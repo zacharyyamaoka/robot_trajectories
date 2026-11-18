@@ -7,8 +7,9 @@ so a checker that passes everything cannot pass this file; an import check in a 
 the package loads no third-party module that robot_msgs itself does not); and the same import in an isolated uv environment
 (``env -u VIRTUAL_ENV uv run --isolated``), whose env holds only what pyproject.toml declares.
 
-WHY (Zach, "dependency-free runtime cores"; the 2026-11-18 round's contract): a RobotDescription, a ReachMap, kinematics or a
-dynamics model enter by shape, never by import, so sim2real, apps and rigs can depend on this package and it on none of them.
+WHY (Zach, "dependency-free runtime cores"; the 2026-11-18 round's contract): a RobotDescription, a ReachMap, kinematics, a
+dynamics model or a collision checker enter by shape, never by import, so sim2real, apps and rigs can depend on this package and
+it on none of them. Plugins (Ruckig, TOPP-RA, a robot's own kinds) are found by entry point (``plugins.py``), never named here.
 """
 
 from __future__ import annotations
@@ -70,12 +71,13 @@ def _planted(folder: Path, rel: str, text: str) -> Path:
 
 
 PLANTED = [
-    ("kind.py", "import bam_reach\n", "kind.py: imports bam_reach"),
-    ("workspace.py", "from bam_robot_descriptions import RobotDescription\n", "workspace.py: imports bam_robot_descriptions"),
+    ("registry.py", "import bam_reach\n", "registry.py: imports bam_reach"),
+    ("space.py", "from bam_robot_descriptions import RobotDescription\n", "space.py: imports bam_robot_descriptions"),
     ("kinds/chirp.py", "def f():\n    import scipy.signal\n", "kinds/chirp.py: imports scipy"),
-    ("generator.py", "import kernels as k\n", "generator.py: imports kernels"),
+    ("segments.py", "import kernels as k\n", "segments.py: imports kernels"),
+    ("time_law.py", "import ruckig\n", "time_law.py: imports ruckig"),
     ("this_week.py", "MAX_ACCELERATION = 7.3896\n", "this_week.py: holds the instance value 7.3896"),
-    ("plans.py", "from . import kernels as k\nimport numpy as np\nfrom robot_msgs import save_npz\nimport json\n", None),
+    ("plugins.py", "from importlib import metadata\nfrom . import kernels as k\nimport numpy as np\nfrom robot_msgs import save_npz\n", None),
 ]
 
 

@@ -1,160 +1,226 @@
 # robot_trajectories
 
-Joint trajectories from what you have. You hand it a robot's limits and a configuration (a purpose plan like
-`plans.pid_tuning(...)`, or records like `StepTrain(...)`), and it hands back one long robot_msgs `JointTrajectory` with every
-segment tied end to start, the same motion as rest-to-rest segments you can run one at a time, and the configuration as JSON
-text that regenerates it sample for sample. Every sample is inside the position, velocity and acceleration limits by
-construction. It is a leaf: numpy and robot_msgs at runtime, nothing else; a robot description, a reach map, kinematics or a
-dynamics model enter by shape, never by import.
+A signal library for robot motion. Every kind of trajectory is a plain function: you pass a `JointSpace` (the robot) and
+numbers, points or poses (the task), and get back one robot_msgs `JointTrajectory`, inside the limits, at rest at both ends,
+carrying the call that made it. Trajectories concatenate (`chain`), cut back into rest-to-rest pieces (`split`) and rebuild
+from their own recipe, sample for sample. It is a leaf: numpy and robot_msgs at runtime, nothing else.
 
-**v0.0.1, local only.** The recommended splice of the 2026-11-18 API round (V2's config records inside, V3's purpose plans in
-front, V4's workspace on the input ladder), promoted from the round's v6 prototype with its motion unchanged, bit for bit.
-Why it is shaped this way, and how to switch to one parent instead: [docs/peps/0001-api-shape.md](docs/peps/0001-api-shape.md).
+**v0.1.0, local only.** Zach picked the round's V1 signal library on 2026-11-18 ("Its pure its functional it feels
+reusable... the type is the API"); this is that, with v6's motion kept bit for bit. Decision record:
+[docs/peps/0002-signal-library.md](docs/peps/0002-signal-library.md).
 
-## The entry ladder
+## The rule: task-agnostic, manifestation-injected
 
-What you pass decides what it can make. Each rung includes the ones before it:
+Zach (Daily Note 2026-11-18): "robot trajectories kinda exist completely independent from any actual physical manifestation
+or task. The actual physical manifestation eventually you can inject ... via like ik/fk dynamics model collision model, etc.
+and the tasks you can pass in like points and stuff. but at this level we never really know about like what the semantic
+meaning is of things. that is why it works for like any robot type, or any task."
 
-1. **Joint limits** (robot_msgs `JointLimits`: position, velocity, acceleration; jerk and a named home when you have them).
-   Every joint-space kind runs here, including all eight the pendulum needs this week. `Workspace.from_limits(limits)`, or
-   `Workspace.from_description(description, max_acceleration=...)` (a URDF never carries an acceleration, so it is refused
-   until you state one).
-2. **+ Kinematics** (forward / inverse, bam_reach's `Kinematics` shape): `workspace.with_kinematics(kinematics)`.
-   A **reach map** is this rung's optional cache, not an input of its own: `workspace.with_reach_map(reach_map)` keeps every
-   centred kind inside the hole-free box around where it starts, and `WorkspaceSweep` tours the reachable set itself.
-3. **+ Dynamics** (a model with `inverse_dynamics(q, velocity, acceleration)`, pin_utils' shape): `workspace.with_dynamics(model)`.
-4. **+ Torque limits** (`max_effort` in the `JointLimits`).
-
-`print(workspace)` shows each rung known or missing and what that costs; `generator.kinds(use_case=...)` grades every kind
-available, fallback (runs, a stated way) or locked (with the call that unlocks it).
+- **The robot is injected into a `JointSpace`**, never imported: joint limits, then kinematics (FK/IK), dynamics, a collision
+  scene and a self-collision model, each a duck-typed protocol.
+- **The task arrives as points, poses and numbers.** No kind knows what the motion is for: no task words in a kind's name,
+  parameters or labels. What a kind serves is a use-case tag.
+- **Every kind returns a robot_msgs JointTrajectory**, the type everything here joins on.
 
 ## Quick start
 
-The call is four lines: a workspace from your limits, a generator on it, a plan, and the trajectory.
-
 ```python
-from robot_trajectories import JointTrajectoryGenerator, Workspace, plans
+from robot_trajectories import JointSpace, chain, hold, pid_tuning, split, step_train, summary
 
-workspace = Workspace.from_limits(limits)                      # robot_msgs JointLimits
-generator = JointTrajectoryGenerator(workspace)
-program = generator.generate(plans.pid_tuning(joint="can11"))  # a plan, or records: [StepTrain(joint="can11"), Hold()]
-trajectory = program.trajectory                                # one JointTrajectory; program.segments: one per step
+space = JointSpace.from_limits(limits)                      # robot_msgs JointLimits: positions, velocities, accelerations
+trajectory = step_train(space, joint="can11")               # a kind: f(space, ..., start=None) -> JointTrajectory
+session = chain(pid_tuning(space, joint="can11"), step_train(space, joint="can11", steps_fraction=(0.3, -0.3)), hold(space, 2.0))
+split(session)                                              # the same motion as rest-to-rest pieces: run one, then wait
 ```
 
-[examples/quick_start.py](examples/quick_start.py) is that call on the CAN 11 pendulum's limits. Run it:
+[examples/quick_start.py](examples/quick_start.py) is that on the CAN 11 pendulum's limits:
 
 ```bash
 /home/bam/robot_trajectories/.venv/bin/python /home/bam/robot_trajectories/examples/quick_start.py
 ```
 
 ```
-30.0 s in 4 segments on can11
-       0.0 -    7.0 s  step train             StepTrain(joint='can11')
-       7.0 -    9.0 s  hold                   Hold(duration_s=2.0)
-       9.0 -   29.0 s  chirp                  Chirp(joint='can11')
-      29.0 -   30.0 s  hold                   Hold() then wait
-robot_msgs.trajectory.joint_trajectory.JointTrajectory: 15011 samples, peak 32°/s of 115°/s
+35.4 s in 6 segments on can11
+       0.0 -    7.0 s  step train                 step_train(space, joint='can11')
+       7.0 -    9.0 s  hold                       hold(space, duration_s=2.0)
+       9.0 -   29.0 s  chirp                      chirp(space, joint='can11')
+      29.0 -   30.0 s  hold                       hold(space)  then wait
+      30.0 -   33.4 s  step train                 step_train(space, joint='can11', steps_fraction=(0.3, -0.3))
+      33.4 -   35.4 s  hold                       hold(space, duration_s=2.0)
+6 rest-to-rest pieces; rebuilt from its 933-character recipe: identical
 ```
 
-More of the API, all in [tests/scenario.py](tests/scenario.py) (the round's scenario on the 1-, 2- and 6-DOF robots):
-
-- `plans.for_use_case("pid_tuning")` and `catalog(use_case="pid_tuning")`: the plans and the record classes that serve a purpose.
-- Plans add with `+` and stay configuration until `generate`: the same plan runs on any robot whose workspace has its inputs.
-- `program.steps` says, per segment, what it measures and whether to wait after it; `program.tapes()` gives each segment as a
-  standalone program.
-- `Program.from_json(program.to_json())` regenerates the motion identically and refuses another robot's limits;
-  `Program.from_trajectory(logged)` rebuilds from a logged trajectory (its `header.meta` carries the config).
-- `print(Chirp.describe())`: a record's catalog card, every field with its unit (angles shown in degrees).
-
-## This week's tapes
-
-Every tape of the pendulum campaign (`plans.sim_to_real_tracking`): settle, repeat floor (5x), linear chirp, velocity
-plateaus, step train, speed ladder, deployment classes and the held-out classes, 5.9 min in all. Each tape is written as
-`NN-<tape>.config.json` (regenerates it) and `NN-<tape>.trajectory.npz` (robot_msgs' own `save_npz`; `robot_msgs.load_npz`
-reads it back), plus the week joined and an `index.json`. The limits come from a file, so the package holds no rig's values;
-[examples/can11_limits.json](examples/can11_limits.json) is the CAN 11 station's.
-
-```bash
-/home/bam/robot_trajectories/.venv/bin/python -m robot_trajectories.this_week --limits /home/bam/robot_trajectories/examples/can11_limits.json --out /home/bam/robot_trajectories/outputs/this_week
-```
-
-These are the round's v6 tapes, array for array and config for config (`tests/test_equivalence.py`). What they say about
-CAN 11: its 7.39 rad/s² acceleration limit caps the speed ladder at 74 % of top speed (the 80, 90 and 100 % rungs all play at
-74 % and say so), and 48 of 60 deployment legs run slower than drawn; reaching top speed needs a higher acceleration limit in
-the station's schedule, not a different tape.
-
-## Adding a kind
-
-One new file in `src/robot_trajectories/kinds/`, no other edit: `kinds/__init__.py` imports every module in its folder, and
-`Kind.__init_subclass__` makes the class a frozen keyword-only record and registers it (refusing a second claim on the same
-catalog row). `catalog()`, `generator.kinds()` and JSON round trips pick it up. `kinds/sine_dwell.py` is the worked example:
+## The robot: a JointSpace, one rung at a time
 
 ```python
-from .. import kernels as k
-from ..kind import Context, Kind, param
-
-
-class SineDwell(Kind):
-    """One sine at a fixed frequency on one joint, faded in and out: the gain and phase at that one frequency."""
-
-    catalog_id = "faded_sine"   # its row in the trajectory catalog
-    family = "excitation"
-    use_cases = ("bandwidth",)
-
-    joint: str | int | None = param(None, "joint", "the joint that moves (name or index; optional on a 1-DOF robot)")
-    frequency_hz: float = param(1.0, "Hz", "the one frequency")
-    duration_s: float = param(10.0, "s", "how long it dwells there, fades included")
-    fade_s: float = param(1.0, "s", "raised-cosine fade in and out")
-    margin: float = param(0.8, "1", "the tightest of room, velocity and acceleration the amplitude reaches")
-
-    def pieces(self, context: Context) -> list[k.Arrays]:
-        return [k.chirp(context.start, context.joint(self.joint), context.room_around(context.start), context.rate_hz,
-                        start_hz=self.frequency_hz, end_hz=self.frequency_hz, duration_s=self.duration_s, logarithmic=False,
-                        fade_s=self.fade_s, margin=self.margin, label=self.display_label)]
+space = JointSpace.from_limits(limits)                                   # joint limits: every joint-space kind runs here
+space = JointSpace.from_description(ur5e, max_acceleration=6.0).within(box)   # a URDF has no acceleration: refused until stated
+space = space.with_kinematics(fk_ik)        # forward(q) -> 4x4, inverse(pose, seed) -> q | None (bam_reach's shape)
+space = space.with_reach_map(reach_map)     # an optional cache: every centred kind stays in the hole-free box (space.room)
+space = space.with_dynamics(model)          # torque(q, qd, qdd); forward(q, qd, tau) -> qdd for effort-commanded kinds
+space = space.with_collision(scene)         # in_collision(q) -> bool: the guard then refuses any colliding sample
+print(space)                                # each rung known or missing, angles in degrees
 ```
 
-A new plan is one decorated function in `plans.py` returning `[step(Record(...), "what it measures"), ...]`. A new catalog row
-is one `TrajectoryKind(...)` in `trajectory_catalog/catalog.py`; then regenerate the JSON:
+A kind that needs a rung the space lacks raises `MissingRung`, naming the rung and the call that adds it.
+
+## Higher-order kinds
+
+A kind can chain other kinds; it is then recorded as its own one call, and its segments keep the calls that make each alone.
+
+```python
+pid_tuning(space, joint="can11")            # step train, settle, chirp, settle (each segment says what it measures)
+sim_to_real_tracking(space, joint="can11")  # this week's eight tapes on the pendulum, one segment each
+friction_id(space, "can11"); tracking_check(space); workspace_survey(space); dynamics_excitation(space)
+repeat_floor_tape(space, "can11")           # one tape five times: the run-to-run floor; repeat(trajectory, times) for any tape
+```
+
+Writing one is a function that threads `start=` from one call to the next and returns `chain(...)`
+(`src/robot_trajectories/kinds/pid_tuning.py`).
+
+## Cartesian paths, with FK/IK passed in
+
+```python
+space = JointSpace.from_description(ur5e, max_acceleration=6.0).within(box).with_kinematics(fk_ik)
+cartesian_path(space, [(0.4, 0.1, 0.3), (0.4, 0.2, 0.3)])   # straight tool lines, IK every 1 mm, refused at the first failing sample
+cartesian_waypoints(space, points)                          # IK at the points only, joint legs between, a dwell at each
+pick_and_place(space, pick, place, lift_m=0.05)             # the U: approach, down, dwell, up, over, down, dwell, up
+```
+
+[examples/ur5e_pick_and_place.py](examples/ur5e_pick_and_place.py) runs the U on a UR5e (its stand-in kinematics are in
+`tests/fixtures/robots.py`):
+
+```bash
+/home/bam/robot_trajectories/.venv/bin/python /home/bam/robot_trajectories/examples/ur5e_pick_and_place.py
+```
+
+Points are in metres in the kinematics' base frame; `orientation="hold"` keeps the tool's start orientation, `"follow"` takes
+each pose's own. An unreachable point raises `Unreachable` naming the sample, the tool point and why. Forward kinematics of
+every output lands within micrometres of the commanded tool points (`tests/test_cartesian.py` holds 1 mm on the UR5e and the
+five-bar).
+
+## Multi-waypoint trajectories
+
+```python
+joint_waypoints(space, [[0.2, -1.4, 1.2, -1.4, -1.6, 0.0], [...]], time_law=TimeLaw.trapezoid(peak_speed_fraction=0.8))
+move(space, joint="can11", targets_fraction=(0.5, -0.5))    # waypoints as fractions of the room around the start
+cartesian_waypoints(space, [p1, p2, p3], dwell_s=0.3)        # tool points
+```
+
+A path kind takes a `TimeLaw`: `TimeLaw.minimum_jerk(peak_speed_fraction=0.6)` or `move_s=`, `TimeLaw.trapezoid(...)`, or a
+plugin's (`TimeLaw("ruckig", ...)`). A leg may start or end moving (`start_state=`, `end_state=`: the quintic through both
+states), which is what a velocity-matched sync needs.
+
+## Segments and recipes
+
+A trajectory carries its segments as a per-sample `segment` channel plus labels in `header.meta`, so slicing, resampling and
+logging keep them. `split`, `chain`, `labels`, `bands` (the kernel pieces), `notes` (what the kinds reported), `annotate`
+(purpose, wait after) and `repeat` are pure functions of trajectories. `recipe(t)` is the JSON of every call with every
+argument; `rebuild(recipe(t))` is `t` again, and a different space is refused by fingerprint. `summary(t)` prints it.
+
+## The catalog
+
+`catalog(use_case="pid_tuning", space=space)` lists the kinds that generate (available, fallback or locked on that space) and,
+honestly marked, the catalog rows nothing implements yet: 25 kinds generate; 50 of the 68 catalog rows are still to build,
+split into six lanes in [docs/KINDS_TODO.md](docs/KINDS_TODO.md). `kinds()` is the registry. The rows themselves (use cases,
+needs, sources, prior art) are `robot_trajectories.trajectory_catalog`, Python records; `catalog.json` is generated:
 
 ```bash
 /home/bam/robot_trajectories/.venv/bin/python -m robot_trajectories.trajectory_catalog.make_json
 ```
 
-## What is in it
+## Adding a kind
 
-| module | what |
-|---|---|
-| `workspace` | `Workspace`: the robot at the rung of knowledge it was built with; `has` / `gap` / `status`, the printed ladder |
-| `kind`, `kinds/` | `Kind` (a frozen config record, one file per kind), `param`, `catalog()`, `Context.room_around` |
-| `generator`, `program` | `JointTrajectoryGenerator.generate(...)` -> `Program` (`.trajectory`, `.segments`, `.steps`, `.bands`, `to_json`) |
-| `plan`, `plans` | `Plan` / `step`: records with a purpose and a "then wait"; the menu of purpose plans |
-| `time_law`, `signals` | `TimeLaw` (a path x a time law; minimum-jerk built), `constant_speed_chirp` |
-| `kernels` | the round's shared math, vendored byte for byte (min-jerk, chirp, multisine, steps, sweeps, grids, tours, join) |
-| `trajectory_catalog` | the 61-row catalog (Python records, `catalog.json` generated): use cases, needs, entry level, prior art |
-| `this_week` | the pendulum campaign's tapes as files (`python -m robot_trajectories.this_week`) |
+One new file in `src/robot_trajectories/kinds/`, no other edit:
 
-`catalog()` lists the 15 record classes that generate; `trajectory_catalog` lists the 61 kinds worth supporting, 14 of which a
-record claims today. Runtime dependencies: numpy and robot_msgs.
+```python
+from .. import kernels as k
+from ..registry import kind
 
-## Not built yet
 
-- **Cartesian paths.** Every kind here is joint-space. The kinematics slot exists and gates: `with_kinematics(k)` unlocks the
-  catalog rows that need FK/IK, but no record generates from it yet (the five-bar's snake paths are its first customer).
-- **The dynamics slot** likewise only gates (optimised excitation, torque feasibility).
-- **Time laws other than minimum-jerk** (trapezoid, S-curve via Ruckig, time-optimal via TOPP-RA) are refused by name.
-- **Torque profiles, event-ended command sequences and pose sets** (17 of the catalog's 61 rows) are catalogued, not generated.
-- **Collision checks** the catalog lists are reported as "not checked here", not done.
+@kind(use_cases=("bandwidth",), catalog_id="faded_sine")
+def sine_dwell(space, joint=None, *, frequency_hz=1.0, duration_s=10.0, fade_s=1.0, margin=0.8, label="sine dwell", start=None):
+    """One sine at a fixed frequency on one joint, faded in and out: the gain and phase at that one frequency."""
+    return k.chirp(start, space.joint_index(joint), space.room(start), space.rate_hz, start_hz=frequency_hz, end_hz=frequency_hz,
+                   duration_s=duration_s, logarithmic=False, fade_s=fade_s, margin=margin, label=label)
+```
+
+The decorator refuses what the space lacks, guards the output (limits, jumps, rest, collisions), and records the call. The
+contract is PEP 0002 §4; `tests/kind_contract.py`'s `check_kind(trajectory, space)` holds a new kind to it.
+
+## Plugins: kinds and time laws from other packages
+
+Simple kinds live here; anything that needs another library (Ruckig, TOPP-RA, a robot's own stack) is a separate package that
+registers by entry point, cut by role:
+
+```toml
+[project.entry-points."robot_trajectories.kinds"]
+my_kinds = "my_package.kinds"
+
+[project.entry-points."robot_trajectories.time_laws"]
+ruckig = "robot_trajectories_ruckig:RuckigBackend"
+```
+
+A plugin kind is listed, tagged and guarded like a built-in one; a time law serves `TimeLaw(name, ...)`. Two providers of one
+time law are refused (Ruckig Pro is a drop-in for `ruckig`, never installed beside Community), and a Ruckig backend never hands
+intermediate waypoints to Community (it sends them to Ruckig's cloud). `robot_trajectories.planners` and `.optimizers` are
+reserved for the later roles.
+
+## Moving targets
+
+`robot_trajectories.moving` is the contract synchronised kinds accept (lane F builds them): a `MovingTarget` (`target(t)`,
+`velocity(t)`, `stamp`, `latency_s`, `window`, `assumes`), `LinearMotion` for constant velocity (it absorbs bam_traj_gen's
+`sync_dir` / `sync_speed`), `TargetWaypoint` (chase, inherit or fixed), `CannotCatch` refusals, and `synchronised(...)`, the
+ruler: within tolerance over the sync window, velocity matched at the sync point. A precomputed sync is a prediction under its
+`assumes`; execution replans or offsets live.
+
+## This week's tapes
+
+Every tape of the pendulum campaign (`sim_to_real_tracking`): settle, repeat floor (5x), linear chirp, velocity plateaus, step
+train, speed ladder, deployment classes and the held-out classes, 5.9 min in all, each written as `NN-<tape>.recipe.json`
+(rebuilds it) and `NN-<tape>.trajectory.npz` (robot_msgs' `save_npz`), plus the week joined and an `index.json`. The limits come
+from a file; [examples/can11_limits.json](examples/can11_limits.json) is the CAN 11 station's.
+
+```bash
+/home/bam/robot_trajectories/.venv/bin/python -m robot_trajectories.this_week --limits /home/bam/robot_trajectories/examples/can11_limits.json --out /home/bam/robot_trajectories/outputs/this_week
+```
+
+The tapes are v6's, array for array (`tests/test_equivalence.py`). On CAN 11 the 7.39 rad/s² acceleration limit caps the speed
+ladder at 74 % of top speed, and 48 of 60 deployment legs run slower than drawn.
 
 ## Run the tests
 
-Each test file is also a plain script, which is how to run them while the arm is powered (no pytest on the rig's host). The
-round's ruler (G1-G4):
+Each test file is a plain script (no pytest on the rig's host while the arm is powered). The round's ruler (G1-G4):
 
 ```bash
 /home/bam/robot_trajectories/.venv/bin/python /home/bam/robot_trajectories/tests/test_scenario.py
 ```
 
-v6's 118 claims:
+v6's motion, bit for bit:
+
+```bash
+/home/bam/robot_trajectories/.venv/bin/python /home/bam/robot_trajectories/tests/test_equivalence.py
+```
+
+The kind contract (decorator, guard, recipe, segments, moving boundaries, time-law seam, injected slots, moving targets):
+
+```bash
+/home/bam/robot_trajectories/.venv/bin/python /home/bam/robot_trajectories/tests/test_contract.py
+```
+
+Cartesian and multi-waypoint kinds on the UR5e and the five-bar:
+
+```bash
+/home/bam/robot_trajectories/.venv/bin/python /home/bam/robot_trajectories/tests/test_cartesian.py
+```
+
+Plugins by entry point:
+
+```bash
+/home/bam/robot_trajectories/.venv/bin/python /home/bam/robot_trajectories/tests/test_plugins.py
+```
+
+v6's claims, carried over:
 
 ```bash
 /home/bam/robot_trajectories/.venv/bin/python /home/bam/robot_trajectories/tests/test_selfcheck.py
@@ -170,12 +236,6 @@ The leaf rule:
 
 ```bash
 /home/bam/robot_trajectories/.venv/bin/python /home/bam/robot_trajectories/tests/test_boundary.py
-```
-
-v6's motion, bit for bit:
-
-```bash
-/home/bam/robot_trajectories/.venv/bin/python /home/bam/robot_trajectories/tests/test_equivalence.py
 ```
 
 With the arm off, pytest runs the same functions:

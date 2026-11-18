@@ -52,6 +52,7 @@ USE_CASES: dict[str, str] = {
     "collision_check": "the motion's swept volume against the robot and the scene",
     "cycle_time": "how long a task cycle takes (picks per minute)",
     "demo": "motion that shows the robot off, or shows a person what it can do",
+    "conveyor_pick_and_place": "moving between points that move (a conveyor's): intercept, track at the target's speed, leave",
 }
 
 # ---------------------------------------------------------------------------------------------------------------- code paths
@@ -166,6 +167,13 @@ KIMBLE = ("Kimble et al. 2020, IEEE RA-L 5(2), Benchmarking protocols for evalua
 BRISTOW = ("Bristow, Tharayil, Alleyne 2006, IEEE Control Systems Magazine 26(3), A survey of iterative learning control", "https://doi.org/10.1109/MCS.2006.1636313")
 MOTEUS_PID = ("moteus PID tuning guide: hold a position and disturb it by hand", "https://github.com/mjbots/moteus/blob/main/docs/guides/pid-tuning.md")
 HWANGBO = ("Hwangbo et al. 2019, Science Robotics, actuator-net data from deployment-like sine foot motions (1-25 Hz)", "https://arxiv.org/abs/1901.08652")
+PILZ = ("MoveIt 2 Pilz industrial motion planner: PTP (trapezoidal joint profiles, synchronised), LIN and CIRC (trapezoidal in "
+        "Cartesian space; an arc by centre or interim point)",
+        "https://moveit.picknik.ai/main/doc/how_to_guides/pilz_industrial_motion_planner/pilz_industrial_motion_planner.html")
+MOVEIT_CARTESIAN = ("MoveIt 2 Move Group interface tutorial: pose goals, joint-space goals and computeCartesianPath (waypoints "
+                    "interpolated at eef_step, IK at every step)",
+                    "https://moveit.picknik.ai/main/doc/examples/move_group_interface/move_group_interface_tutorial.html")
+CONVEYOR = "src/core/mdp/agent/actor/policy/bam_grasp/src/bam_grasp/conveyor.py"
 ISAAC_SYSID = ("Isaac Sim system identification: sine sweeps, multisines, splines, and a separate validation trajectory",
                "https://docs.isaacsim.omniverse.nvidia.com/latest/robot_setup/ext_isaacsim_robot_setup_sysid.html")
 
@@ -465,7 +473,7 @@ CATALOG: tuple[TrajectoryKind, ...] = (
         id="rapid_replan", name="Rapid replanning", family="controller_test",
         one_line="A new trajectory every 0.15 s, each starting from the previous one's state at that instant (position and velocity), to "
                  "seeded targets near home.",
-        use_cases=("tracking_eval", "smoke_test"),
+        use_cases=("tracking_eval", "smoke_test", "conveyor_pick_and_place"),
         # WHY time_signal: the 0.15 s replan clock is what it tests (state handed over mid-motion); the targets are incidental
         starts_as="time_signal",
         space="joint", scope="coordinated_multi_joint", output="joint_trajectory", needs=(*LIMITS, "home_pose"),
@@ -588,6 +596,22 @@ CATALOG: tuple[TrajectoryKind, ...] = (
         notes="The runner's waypoints 'q:move_s:dwell_s;...' are minimum-jerk legs that return to the start; its speed check uses the 1.875 peak.",
     ),
     TrajectoryKind(
+        id="joint_waypoints", name="Joint-space waypoints", family="point_to_point",
+        one_line="Rest-to-rest moves through a list of absolute joint configurations, each leg timed by one time law, dwelling at "
+                 "each: the classic PTP sequence of a 6-DOF arm, on any joint count.",
+        use_cases=("tracking_eval", "stop_accuracy", "cycle_time", "demo"),
+        # WHY path: the configurations are the content; the time law (minimum-jerk, trapezoid, a plugin's) is a choice
+        starts_as="path",
+        space="joint", scope="coordinated_multi_joint", output="joint_trajectory", needs=LIMITS,
+        parameters=(("peak_speed_fraction", "1", 0.5), ("dwell_s", "s", 0.2)),
+        segments_join="starts_and_ends_at_rest",
+        exists_in=(f"{EXPERIMENTS}:1278",),
+        prior_art=(PILZ, RTB, MODERN_ROBOTICS),
+        priority="now",
+        notes="Zach 11-18: 'What about like multi waypoint trajectories?' minimum_jerk_move takes fractions of the room around its "
+              "start; this takes absolute configurations (a pose library, READY, a calibration set).",
+    ),
+    TrajectoryKind(
         id="trapezoidal_velocity", name="Trapezoidal velocity move", family="point_to_point",
         one_line="Accelerate at a, cruise at v, decelerate at a (a triangle when the distance is too short to reach v).",
         use_cases=("tracking_eval", "cycle_time"),
@@ -671,6 +695,51 @@ CATALOG: tuple[TrajectoryKind, ...] = (
         exists_in=(f"{FIVEBAR}/tapes.py:323", f"{RUNGS}:155"),
         prior_art=(RTB, ISO_9283),
         priority="next",
+    ),
+    TrajectoryKind(
+        id="cartesian_waypoints", name="Cartesian waypoints", family="point_to_point",
+        one_line="The tool visits a list of points or poses and dwells at each; inverse kinematics at the points only, joint-space "
+                 "legs between them (the tool does not move straight between points).",
+        use_cases=("tracking_eval", "stop_accuracy", "accuracy", "cycle_time", "demo"),
+        starts_as="path", dimensions=("2D", "3D", "6D"),  # points in a plane (the five-bar), a volume, or full poses (the UR5e)
+        space="cartesian", scope="coordinated_multi_joint", output="joint_trajectory",
+        needs=(*LIMITS, "forward_kinematics", "inverse_kinematics"),
+        parameters=(("peak_speed_fraction", "1", 0.5), ("dwell_s", "s", 0.2)),
+        segments_join="starts_and_ends_at_rest",
+        exists_in=(f"{TRAJGEN}/bam_traj_gen/src/bam_traj_gen/traj_generator.py:546",),
+        prior_art=(MOVEIT_CARTESIAN, PILZ),
+        priority="next",
+        notes="The Cartesian twin of joint_waypoints: MoveIt's pose goals in a row. cartesian_straight_line is the straight-line version.",
+    ),
+    TrajectoryKind(
+        id="cartesian_arc", name="Circular arc of the tool (CIRC)", family="point_to_point",
+        one_line="The tool moves on a circular arc from where it is to a goal, the arc set by its centre or by a point it passes "
+                 "through, at rest at both ends, inverse kinematics at every step.",
+        use_cases=("tracking_eval", "accuracy", "demo"),
+        starts_as="path", dimensions=("2D",),  # an arc lies in a plane; its orientation is held or interpolated, not shaped
+        space="cartesian", scope="cartesian_path", output="joint_trajectory",
+        needs=(*LIMITS, "forward_kinematics", "inverse_kinematics"),
+        parameters=(("interim_or_centre", "text", "interim"), ("peak_speed_fraction", "1", 0.5)),
+        segments_join="starts_and_ends_at_rest",
+        exists_in=(),
+        prior_art=(PILZ, ISO_9283),
+        priority="next",
+        notes="Pilz's CIRC. circular_test is the full closed circle measured as a ballbar; this is the arc move of the 6-DOF family.",
+    ),
+    TrajectoryKind(
+        id="approach_retreat", name="Approach and retreat along the tool axis", family="point_to_point",
+        one_line="A straight tool move along its own axis to a pose and back out (or out only): the short linear legs before and "
+                 "after a point, held to the tool's orientation.",
+        use_cases=("tracking_eval", "stop_accuracy", "cycle_time", "contact_eval"),
+        starts_as="path", dimensions=("1D",),  # a line along the tool axis
+        space="cartesian", scope="cartesian_path", output="joint_trajectory",
+        needs=(*LIMITS, "forward_kinematics", "inverse_kinematics"),
+        parameters=(("distance_m", "m", 0.05), ("peak_speed_fraction", "1", 0.3), ("dwell_s", "s", 0.3)),
+        segments_join="starts_and_ends_at_rest",
+        exists_in=(f"{REACH_DATASET}:145",),
+        prior_art=(PILZ, MOVEIT_CARTESIAN),
+        priority="next",
+        notes="bam_reach's pick_and_lift recipe is an approach plus a retreat; the axis is the tool's own z unless one is given.",
     ),
     TrajectoryKind(
         id="cartesian_a_to_b", name="Pose-to-pose move from the reach map", family="point_to_point",
@@ -1041,7 +1110,7 @@ CATALOG: tuple[TrajectoryKind, ...] = (
         id="pick_and_place_cycle", name="Pick-and-place cycle", family="task_cycle",
         one_line="Approach above, pre-grasp, a two-stage descent (hover, settle, slow final line), close, lift, carry, place, release, return: "
                  "the cycle the facility runs, scored in picks per minute.",
-        use_cases=("cycle_time", "tracking_eval", "stop_accuracy", "contact_eval", "demo"),
+        use_cases=("cycle_time", "tracking_eval", "stop_accuracy", "contact_eval", "demo", "conveyor_pick_and_place"),
         starts_as="path", dimensions=("3D", "6D"),  # approach, descend, lift and carry in space; the grasp's orientation on a 6-DOF arm
         space="cartesian", scope="coordinated_multi_joint", output="joint_trajectory",
         needs=(*TIMED, "reach_map", "forward_kinematics", "inverse_kinematics", "collision_model", "camera"),
@@ -1053,6 +1122,53 @@ CATALOG: tuple[TrajectoryKind, ...] = (
         priority="next",
         notes="Zach 11-12: don't score traj gen on facility KPIs; keep its own (SPPM in bam_trajgen_bench). The two-stage descent is "
               "pick_stops' fix for cogging error on a long descent.",
+    ),
+    TrajectoryKind(
+        id="moving_target_track", name="Approach and track a moving point", family="task_cycle",
+        one_line="From rest, meet a point that moves (a pose as a function of time) at the sync time with its velocity matched, "
+                 "then follow it within tolerance to the end of the sync window, then come to rest.",
+        use_cases=("tracking_eval", "conveyor_pick_and_place", "cycle_time"),
+        # WHY path: the target's motion is geometry given in time; the approach and leave legs take a time law
+        starts_as="path", dimensions=("1D", "2D", "3D", "6D"),  # a point moving on a line, a plane, in space, or a full pose
+        space="cartesian", scope="cartesian_path", output="joint_trajectory",
+        needs=(*LIMITS, "forward_kinematics", "inverse_kinematics"),
+        parameters=(("sync_start_s", "s", 1.0), ("sync_end_s", "s", 2.0), ("tolerance_m", "m", 0.001)),
+        segments_join="starts_and_ends_at_rest",
+        exists_in=(f"{CONVEYOR}:72", f"{RUNGS}:336"),
+        prior_art=(),
+        priority="next",
+        notes="Zach 11-18: 'You can account for like trajectory points that are moving'. Contract and ruler: "
+              "robot_trajectories.moving (synchronised). bam_grasp's conveyor leads the target by 0.25 s to cancel servo lag.",
+    ),
+    TrajectoryKind(
+        id="track_and_release", name="Track, then leave a moving point", family="task_cycle",
+        one_line="Already moving with a point, keep with it for a dwell in its frame, then leave it along a direction to rest: "
+                 "the second half of a moving-target cycle.",
+        use_cases=("tracking_eval", "conveyor_pick_and_place"),
+        starts_as="path", dimensions=("1D", "2D", "3D", "6D"),
+        space="cartesian", scope="cartesian_path", output="joint_trajectory",
+        needs=(*LIMITS, "forward_kinematics", "inverse_kinematics"),
+        parameters=(("dwell_s", "s", 0.3), ("leave_m", "m", 0.05)),
+        segments_join="starts_and_ends_at_rest",
+        exists_in=(f"{CONVEYOR}:72",),
+        prior_art=(),
+        priority="later",
+    ),
+    TrajectoryKind(
+        id="moving_pick_and_place", name="U between points that move", family="task_cycle",
+        one_line="The U of pick_and_place_cycle (approach, down, dwell, up, over, down, dwell, up) where the first point moves: "
+                 "down and up are tracked in the point's frame, synchronised at the bottom.",
+        use_cases=("conveyor_pick_and_place", "cycle_time", "tracking_eval"),
+        starts_as="path", dimensions=("3D", "6D"),
+        space="cartesian", scope="coordinated_multi_joint", output="joint_trajectory",
+        needs=(*LIMITS, "forward_kinematics", "inverse_kinematics"),
+        parameters=(("lift_m", "m", 0.05), ("sync_window_s", "s", 0.5), ("tolerance_m", "m", 0.001)),
+        segments_join="starts_and_ends_at_rest",
+        exists_in=(f"{CONVEYOR}:72", f"{REACH_DATASET}:49"),
+        prior_art=(),
+        priority="next",
+        notes="bam_grasp's conveyor line delivered 19/40 on a moving belt against 30/40 static: the loss is tracking error "
+              "along the belt, which this kind's sync window makes a measured, gated number.",
     ),
     TrajectoryKind(
         id="adept_cycle", name="Adept cycle", family="task_cycle",
@@ -1072,7 +1188,7 @@ CATALOG: tuple[TrajectoryKind, ...] = (
         id="touch_down_contact", name="Touch-down on a surface", family="task_cycle",
         one_line="Descend from above a surface, the last stretch at a constant touch speed aiming slightly below it, dwell in contact, lift: "
                  "peak force, bounces and press-force error.",
-        use_cases=("contact_eval", "pid_tuning", "tracking_eval"),
+        use_cases=("contact_eval", "pid_tuning", "tracking_eval", "conveyor_pick_and_place"),
         # WHY path: the touch speed is a speed you pick for the last stretch (the rungs 0.05 / 0.10 / 0.20 m/s): still a path
         starts_as="path", dimensions=("1D",),  # a vertical line down and back up
         space="cartesian", scope="cartesian_path", output="joint_trajectory", needs=("joint_limits", "velocity_limits", "reach_map", "inverse_kinematics"),

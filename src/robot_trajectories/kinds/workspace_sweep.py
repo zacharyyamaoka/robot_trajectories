@@ -3,36 +3,22 @@ from __future__ import annotations
 import math
 
 from .. import kernels as k
+from ..registry import kind
 
-from ..kind import Context, Kind, param
 
+@kind(use_cases=("workspace_coverage", "accuracy", "kinematic_calibration"),
+      better_with={"reach_map": "a serpentine grid over the box, every configuration in it assumed reachable"},
+      unchecked=("jerk_limits", "collision_model"), catalog_id="joint_grid_snake")
+def workspace_sweep(space, *, grid_step=math.radians(12.0), joints=None, points_per_joint=3, margin=0.05, speed=0.8, dwell_s=0.05,
+                    label="workspace sweep", start=None):
+    """Visit a grid of configurations: with a reach map, every reachable one on a ``grid_step`` grid (rad, a whole multiple of
+    the map's step), moving only between grid neighbours so no leg crosses a hole; without one, a serpentine grid of
+    ``points_per_joint`` over ``joints`` inside the box shrunk by ``margin``. Coverage, accuracy, calibration poses.
 
-class WorkspaceSweep(Kind):
-    """Visit a grid of configurations: with a reach map, every reachable one, moving only between grid neighbours; without
-    one, a serpentine grid over the box (V4's fallback). Coverage, accuracy, calibration poses."""
-
-    catalog_id = "joint_grid_snake"
-    family = "coverage"
-    starts_as = "path"
-    use_cases = ("workspace_coverage", "accuracy", "kinematic_calibration")
-    needs = ("joint_limits", "velocity_limits", "acceleration_limits", "reach_map")
-    without = {"reach_map": "a serpentine grid over the box, every configuration in it assumed reachable"}
-    unchecked = ("jerk_limits", "collision_model")  # the catalog's wrist-coverage source times its legs with Ruckig
-
-    grid_step: float = param(math.radians(12.0), "rad", "with a reach map: the visited grid (a whole multiple of the map's step)")
-    joints: tuple[str, ...] | None = param(None, "joints", "without a reach map: the joints the grid spans (default every joint)")
-    points_per_joint: int = param(3, "count", "without a reach map: grid points along each spanned joint")
-    margin: float = param(0.05, "1", "without a reach map: fraction of each joint's range kept clear at both ends")
-    speed: float = param(0.8, "1", "fraction of the velocity and acceleration limits a leg may use")
-    dwell_s: float = param(0.05, "s", "the hold at each grid point")
-
-    def pieces(self, context: Context) -> list[k.Arrays]:
-        if context.reach is not None:
-            grid = context.reach.reachable_on_grid(self.grid_step)
-            tour = k.reachable_tour(grid, self.grid_step, context.start)  # neighbour moves only: never across a hole
-            return k.waypoint_chain(tour, context.bounds, context.rate_hz, start=context.start, speed=self.speed,
-                                    dwell_s=self.dwell_s, label=self.display_label)
-        grid = k.serpentine_grid(context.bounds, self.points_per_joint, joints=context.joints(self.joints), margin=self.margin,
-                                 rest=context.start)
-        return k.waypoint_chain(grid, context.bounds, context.rate_hz, start=context.start, speed=self.speed,
-                                dwell_s=self.dwell_s, label=self.display_label)
+    ``speed``: the fraction of the velocity and acceleration limits a leg may use."""
+    if space.reach is not None:
+        grid = space.reach.reachable_on_grid(grid_step)
+        tour = k.reachable_tour(grid, grid_step, start)  # neighbour moves only: never across a hole
+        return k.waypoint_chain(tour, space.bounds, space.rate_hz, start=start, speed=speed, dwell_s=dwell_s, label=label)
+    grid = k.serpentine_grid(space.bounds, points_per_joint, joints=space.joint_indices(joints), margin=margin, rest=start)
+    return k.waypoint_chain(grid, space.bounds, space.rate_hz, start=start, speed=speed, dwell_s=dwell_s, label=label)

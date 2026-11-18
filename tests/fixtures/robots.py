@@ -148,3 +148,187 @@ UR5E_DEMO_BOX = JointLimits(
     position_kind=("software",) * 6,
 )
 UR5E_ASSUMED_ACCELERATION = 6.0  # rad/s^2: assumed for previews (the URDF has none)
+
+
+# ====================================================================== kinematics, dynamics and a scene to inject (numpy only)
+# Added for robot_trajectories 0.1.0 (PEP 0002): the shapes a JointSpace takes by duck typing, never by import. Stand-ins,
+# labelled: the five-bar's closed form is the bench's geometry above; the UR5e's is its published DH table; the pendulum's
+# dynamics and the UR5e scene are made-up test values, not measurements.
+
+
+def fivebar_tool_point(theta_j2: float, theta_c1: float) -> tuple[float, float] | None:
+    """The five-bar's tool point (x, y) in its plane frame (m) for a motor pair, or None where the linkage does not close
+    (fb_bench/mapping.py ee_position on fivebar_passive's j3)."""
+    passive = fivebar_passive(theta_j2, theta_c1)
+    if passive is None:
+        return None
+    g = FIVEBAR
+    j3 = passive[0]
+    return (g["L_shoulder"] + g["L_l1"] * math.cos(theta_j2) + g["L_l2"] * math.cos(theta_j2 + j3),
+            g["L_l1"] * math.sin(theta_j2) + g["L_l2"] * math.sin(theta_j2 + j3))
+
+
+@dataclass(frozen=True)
+class FiveBarKinematics:
+    """The bench five-bar's tool point, closed form both ways (bam_reach's Kinematics shape; position only: a planar point).
+
+    ``inverse``: the serial chain's elbow from the point (j3 in either branch), then the crank angle where the coupler closes
+    (two circle intersections), kept only where ``forward`` of the answer lands on the point with the fold margin at least
+    ``min_fold_margin`` (the scenario's reachability test uses 0.2), nearest the seed."""
+
+    name: str = "bam_fb bench five-bar, tool point (closed form)"
+    joint_names: tuple[str, ...] = ("j2", "c1")
+    cache_key: str = "fivebar-closed-form-1"
+    orientation_constraint: str = "none"
+    min_fold_margin: float = 0.2
+
+    def forward(self, joint_positions):
+        j2, c1 = (float(value) for value in joint_positions)
+        passive = fivebar_passive(j2, c1)
+        if passive is None or passive[2] < self.min_fold_margin:
+            return None
+        x, y = fivebar_tool_point(j2, c1)
+        heading = j2 + passive[0]
+        pose = np.eye(4)
+        pose[:2, :2] = [[math.cos(heading), -math.sin(heading)], [math.sin(heading), math.cos(heading)]]
+        pose[:2, 3] = (x, y)
+        return pose
+
+    def inverse(self, target_pose, seed=None):
+        target = np.asarray(target_pose, float)
+        x, y = (target[:3, 3] if target.shape == (4, 4) else target)[:2]
+        g = FIVEBAR
+        dx, dy = x - g["L_shoulder"], y
+        cosine = (dx * dx + dy * dy - g["L_l1"] ** 2 - g["L_l2"] ** 2) / (2 * g["L_l1"] * g["L_l2"])
+        if abs(cosine) > 1:
+            return None
+        found = []
+        for j3 in (-math.acos(cosine), math.acos(cosine)):
+            j2 = _wrap(math.atan2(dy, dx) - math.atan2(g["L_l2"] * math.sin(j3), g["L_l1"] + g["L_l2"] * math.cos(j3)))
+            lever = j2 + j3 + math.pi - g["theta_elbow_offset"]
+            px = g["L_shoulder"] + g["L_l1"] * math.cos(j2) + g["L_elbow"] * math.cos(lever)
+            py = g["L_l1"] * math.sin(j2) + g["L_elbow"] * math.sin(lever)
+            rho = math.hypot(px, py)
+            reach = (g["L_c1"] ** 2 + rho * rho - g["L_c2"] ** 2) / (2 * g["L_c1"] * rho)
+            if abs(reach) > 1:
+                continue
+            for c1 in (math.atan2(py, px) + math.acos(reach), math.atan2(py, px) - math.acos(reach)):
+                c1 = _wrap(c1)
+                if self.forward((j2, c1)) is None:
+                    continue
+                point = fivebar_tool_point(j2, c1)
+                if math.hypot(point[0] - x, point[1] - y) < 1e-9:
+                    found.append(np.array([j2, c1]))
+        if not found:
+            return None
+        if seed is None:
+            return found[0]
+        seed = np.asarray(seed, float)
+        return min(found, key=lambda q: float(np.max(np.abs([_wrap(a - b) for a, b in zip(q, seed)]))))
+
+
+# UR5e, standard DH (Universal Robots' published parameters): link offsets d, lengths a, twists alpha.
+UR5E_DH_D = (0.1625, 0.0, 0.0, 0.1333, 0.0997, 0.0996)
+UR5E_DH_A = (0.0, -0.425, -0.3922, 0.0, 0.0, 0.0)
+UR5E_DH_ALPHA = (math.pi / 2, 0.0, 0.0, math.pi / 2, -math.pi / 2, 0.0)
+
+
+def ur5e_frames(q) -> list[np.ndarray]:
+    """The base frame and each of the six DH frames, as 4x4 transforms in the base frame (the last is the tool flange)."""
+    frames = [np.eye(4)]
+    for theta, d, a, alpha in zip(np.asarray(q, float), UR5E_DH_D, UR5E_DH_A, UR5E_DH_ALPHA, strict=True):
+        ct, st, ca, sa = math.cos(theta), math.sin(theta), math.cos(alpha), math.sin(alpha)
+        frames.append(frames[-1] @ np.array([[ct, -st * ca, st * sa, a * ct], [st, ct * ca, -ct * sa, a * st],
+                                             [0.0, sa, ca, d], [0.0, 0.0, 0.0, 1.0]]))
+    return frames
+
+
+def _rotation_vector(rotation: np.ndarray) -> np.ndarray:
+    skew = np.array([rotation[2, 1] - rotation[1, 2], rotation[0, 2] - rotation[2, 0], rotation[1, 0] - rotation[0, 1]])
+    angle = math.acos(max(-1.0, min(1.0, (np.trace(rotation) - 1.0) / 2.0)))
+    return 0.5 * skew if angle < 1e-9 else angle / (2.0 * math.sin(angle)) * skew
+
+
+@dataclass(frozen=True)
+class UR5eKinematics:
+    """The UR5e's flange pose: DH forward kinematics, damped-least-squares inverse kinematics seeded at ``seed``."""
+
+    name: str = "UR5e (DH forward, damped least squares inverse)"
+    joint_names: tuple[str, ...] = UR5E_JOINTS
+    cache_key: str = "ur5e-dh-dls-1"
+    orientation_constraint: str = "full"
+    damping: float = 0.01
+    max_iterations: int = 200
+
+    def forward(self, joint_positions):
+        return ur5e_frames(joint_positions)[-1]
+
+    def jacobian(self, joint_positions) -> np.ndarray:
+        frames = ur5e_frames(joint_positions)
+        tool = frames[-1][:3, 3]
+        columns = []
+        for frame in frames[:-1]:
+            axis = frame[:3, 2]
+            columns.append(np.concatenate([np.cross(axis, tool - frame[:3, 3]), axis]))
+        return np.array(columns).T
+
+    def inverse(self, target_pose, seed=None):
+        target = np.asarray(target_pose, float)
+        q = np.zeros(6) if seed is None else np.array(seed, float)
+        for _ in range(self.max_iterations):
+            pose = self.forward(q)
+            error = np.concatenate([target[:3, 3] - pose[:3, 3], _rotation_vector(target[:3, :3] @ pose[:3, :3].T)])
+            if np.linalg.norm(error[:3]) < 1e-10 and np.linalg.norm(error[3:]) < 1e-9:
+                return q
+            jacobian = self.jacobian(q)
+            step = jacobian.T @ np.linalg.solve(jacobian @ jacobian.T + self.damping**2 * np.eye(6), error)
+            largest = float(np.max(np.abs(step)))
+            q = q + (step * 0.2 / largest if largest > 0.2 else step)
+        return None
+
+
+@dataclass(frozen=True)
+class UR5eScene:
+    """A test scene for the UR5e: a floor plane and one axis-aligned box, checked at the DH frame origins from the elbow out
+    and the midpoints between them (``in_collision`` and ``distance``, the CollisionChecker shape). Made-up geometry."""
+
+    box_min: tuple[float, float, float] = (0.6, 0.6, 0.0)
+    box_max: tuple[float, float, float] = (0.8, 0.8, 0.2)
+    floor_z: float = 0.0
+    name: str = "floor plane + one box (test stand-in)"
+    cache_key: str = "ur5e-scene-1"
+
+    def points(self, q) -> np.ndarray:
+        origins = np.array([frame[:3, 3] for frame in ur5e_frames(q)[1:]])
+        return np.vstack([origins[1:], 0.5 * (origins[:-1] + origins[1:])])
+
+    def distance(self, q) -> float:
+        points = self.points(q)
+        low, high = np.asarray(self.box_min), np.asarray(self.box_max)
+        outside = np.linalg.norm(np.maximum(np.maximum(low - points, points - high), 0.0), axis=1)
+        inside = np.min(np.minimum(points - low, high - points), axis=1)
+        to_box = np.where(outside > 0, outside, -inside)
+        return float(min(np.min(points[:, 2] - self.floor_z), np.min(to_box)))
+
+    def in_collision(self, q) -> bool:
+        return self.distance(q) < 0.0
+
+
+@dataclass(frozen=True)
+class PendulumDynamics:
+    """The pendulum as J qdd + b qd + m g l sin(q) = tau, q from the gravity bottom (made-up values: a stand-in for lane B's
+    effort-commanded kinds, not CAN 11's identified model)."""
+
+    inertia: float = 0.02  # kg m^2
+    gravity_torque: float = 0.3  # m g l, N m
+    damping: float = 0.05  # N m s / rad
+    name: str = "pendulum stand-in (J qdd + b qd + m g l sin q)"
+    cache_key: str = "pendulum-stand-in-1"
+
+    def torque(self, q, qd, qdd):
+        q, qd, qdd = (np.asarray(value, float) for value in (q, qd, qdd))
+        return self.inertia * qdd + self.damping * qd + self.gravity_torque * np.sin(q)
+
+    def forward(self, q, qd, tau):
+        q, qd, tau = (np.asarray(value, float) for value in (q, qd, tau))
+        return (tau - self.damping * qd - self.gravity_torque * np.sin(q)) / self.inertia

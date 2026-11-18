@@ -1,34 +1,21 @@
 from __future__ import annotations
 
 from .. import kernels as k
+from ..registry import kind
 
-from ..kind import Context, Kind, param
 
-
-class Chirp(Kind):
+@kind(use_cases=("pid_tuning", "bandwidth", "inertia_id"), catalog_id="log_chirp")
+def chirp(space, joint=None, *, start_hz=0.2, end_hz=5.0, duration_s=20.0, logarithmic=True, fade_s=1.0, margin=0.8,
+          label="chirp", start=None):
     """A sine swept from start_hz to end_hz on one joint at ONE amplitude for the whole sweep (the shared kernel): its
     frequency response and bandwidth.
 
-    WHY it keeps the shared kernel, whose highest frequency sets the amplitude everywhere: the round's frozen scenario is
-    this motion, sample for sample. ``LinearChirp`` carries the catalog's constant-speed rule (larger at low frequency)."""
+    ``logarithmic``: equal time per octave (True) or per hertz. ``fade_s``: a raised-cosine fade in and out, so it starts and
+    ends at rest. ``margin``: the tightest of room, velocity and acceleration the amplitude reaches.
 
-    catalog_id = "log_chirp"
-    family = "excitation"
-    use_cases = ("pid_tuning", "bandwidth", "inertia_id")  # the round's tags (catalog.json's log_chirp omits pid_tuning)
-
-    joint: str | int | None = param(None, "joint", "the joint that moves (name or index; optional on a 1-DOF robot)")
-    start_hz: float = param(0.2, "Hz", "the sweep's first frequency")
-    end_hz: float = param(5.0, "Hz", "the sweep's last frequency")
-    duration_s: float = param(20.0, "s", "the sweep's length, fades included")
-    logarithmic: bool = param(True, "bool", "equal time per octave (True) or per hertz (False)")
-    fade_s: float = param(1.0, "s", "raised-cosine fade in and out, so it starts and ends at rest")
-    margin: float = param(0.8, "1", "the tightest of room, velocity and acceleration the amplitude reaches")
-
-    def check(self) -> None:
-        if self.start_hz <= 0 or self.end_hz <= 0:
-            raise ValueError(f"Chirp frequencies must be positive, got {self.start_hz} and {self.end_hz} Hz")
-
-    def pieces(self, context: Context) -> list[k.Arrays]:
-        return [k.chirp(context.start, context.joint(self.joint), context.room_around(context.start), context.rate_hz,
-                        start_hz=self.start_hz, end_hz=self.end_hz, duration_s=self.duration_s, logarithmic=self.logarithmic,
-                        fade_s=self.fade_s, margin=self.margin, label=self.display_label)]
+    WHY it keeps the shared kernel, whose highest frequency sets the amplitude everywhere: the round's frozen scenario is this
+    motion, sample for sample. ``linear_chirp`` carries the catalog's constant-speed rule (larger at low frequency)."""
+    if start_hz <= 0 or end_hz <= 0:
+        raise ValueError(f"chirp frequencies must be positive, got {start_hz} and {end_hz} Hz")
+    return k.chirp(start, space.joint_index(joint), space.room(start), space.rate_hz, start_hz=start_hz, end_hz=end_hz,
+                   duration_s=duration_s, logarithmic=logarithmic, fade_s=fade_s, margin=margin, label=label)

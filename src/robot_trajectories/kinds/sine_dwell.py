@@ -1,24 +1,13 @@
 from __future__ import annotations
 
 from .. import kernels as k
+from ..registry import kind
 
-from ..kind import Context, Kind, param
 
+@kind(use_cases=("bandwidth",), catalog_id="faded_sine")
+def sine_dwell(space, joint=None, *, frequency_hz=1.0, duration_s=10.0, fade_s=1.0, margin=0.8, label="sine dwell", start=None):
+    """One sine at a fixed frequency on one joint, faded in and out: the gain and phase at that one frequency.
 
-class SineDwell(Kind):
-    """One sine at a fixed frequency on one joint, faded in and out: the gain and phase at that one frequency."""
-
-    catalog_id = "faded_sine"
-    family = "excitation"
-    use_cases = ("bandwidth",)
-
-    joint: str | int | None = param(None, "joint", "the joint that moves (name or index; optional on a 1-DOF robot)")
-    frequency_hz: float = param(1.0, "Hz", "the one frequency")
-    duration_s: float = param(10.0, "s", "how long it dwells there, fades included")
-    fade_s: float = param(1.0, "s", "raised-cosine fade in and out")
-    margin: float = param(0.8, "1", "the tightest of room, velocity and acceleration the amplitude reaches")
-
-    def pieces(self, context: Context) -> list[k.Arrays]:
-        return [k.chirp(context.start, context.joint(self.joint), context.room_around(context.start), context.rate_hz,
-                        start_hz=self.frequency_hz, end_hz=self.frequency_hz, duration_s=self.duration_s, logarithmic=False,
-                        fade_s=self.fade_s, margin=self.margin, label=self.display_label)]
+    Dwelling at one frequency averages the noise out of that point, where a chirp passes through it once."""
+    return k.chirp(start, space.joint_index(joint), space.room(start), space.rate_hz, start_hz=frequency_hz, end_hz=frequency_hz,
+                   duration_s=duration_s, logarithmic=False, fade_s=fade_s, margin=margin, label=label)

@@ -2,43 +2,43 @@
   "schema": "trajectory_catalog/1",
   "generated_by": "robot_trajectories/trajectory_catalog/make_json.py from catalog.py (do not edit)",
   "counts": {
-    "kinds": 61,
+    "kinds": 68,
     "by_family": {
       "excitation": 14,
       "controller_test": 5,
       "quasi_static": 6,
-      "point_to_point": 9,
+      "point_to_point": 13,
       "coverage": 6,
       "standard_test": 5,
       "calibration": 5,
       "stress": 4,
-      "task_cycle": 4,
+      "task_cycle": 7,
       "hold": 3
     },
     "by_priority": {
-      "now": 8,
-      "next": 31,
-      "later": 22
+      "now": 9,
+      "next": 36,
+      "later": 23
     },
     "by_output": {
-      "joint_trajectory": 44,
+      "joint_trajectory": 51,
       "torque_profile": 4,
       "command_sequence": 6,
       "pose_set": 7
     },
     "by_starts_as": {
       "time_signal": 30,
-      "path": 31
+      "path": 38
     },
     "by_dimension": {
-      "1D": 31,
-      "2D": 27,
-      "3D": 25,
-      "6D": 27
+      "1D": 34,
+      "2D": 32,
+      "3D": 30,
+      "6D": 32
     },
     "by_entry_level": {
-      "joint_limits": 36,
-      "kinematics": 14,
+      "joint_limits": 37,
+      "kinematics": 20,
       "dynamics": 3,
       "torque_limits": 8
     }
@@ -83,7 +83,8 @@
       "smoke_test": "a quick does-it-work-at-all pass before longer runs",
       "collision_check": "the motion's swept volume against the robot and the scene",
       "cycle_time": "how long a task cycle takes (picks per minute)",
-      "demo": "motion that shows the robot off, or shows a person what it can do"
+      "demo": "motion that shows the robot off, or shows a person what it can do",
+      "conveyor_pick_and_place": "moving between points that move (a conveyor's): intercept, track at the target's speed, leave"
     },
     "spaces": [
       "joint",
@@ -1490,7 +1491,8 @@
       "one_line": "A new trajectory every 0.15 s, each starting from the previous one's state at that instant (position and velocity), to seeded targets near home.",
       "use_cases": [
         "tracking_eval",
-        "smoke_test"
+        "smoke_test",
+        "conveyor_pick_and_place"
       ],
       "space": "joint",
       "starts_as": "time_signal",
@@ -1998,6 +2000,68 @@
       "entry_extras": []
     },
     {
+      "id": "joint_waypoints",
+      "name": "Joint-space waypoints",
+      "family": "point_to_point",
+      "one_line": "Rest-to-rest moves through a list of absolute joint configurations, each leg timed by one time law, dwelling at each: the classic PTP sequence of a 6-DOF arm, on any joint count.",
+      "use_cases": [
+        "tracking_eval",
+        "stop_accuracy",
+        "cycle_time",
+        "demo"
+      ],
+      "space": "joint",
+      "starts_as": "path",
+      "scope": "coordinated_multi_joint",
+      "output": "joint_trajectory",
+      "needs": [
+        "joint_limits",
+        "velocity_limits",
+        "acceleration_limits"
+      ],
+      "parameters": [
+        {
+          "name": "peak_speed_fraction",
+          "unit": "1",
+          "default": 0.5
+        },
+        {
+          "name": "dwell_s",
+          "unit": "s",
+          "default": 0.2
+        }
+      ],
+      "segments_join": "starts_and_ends_at_rest",
+      "exists_in": [
+        "src/dev/bam_rack_twin/bam_rack_twin/hardware/experiments.py:1278"
+      ],
+      "prior_art": [
+        {
+          "citation": "MoveIt 2 Pilz industrial motion planner: PTP (trapezoidal joint profiles, synchronised), LIN and CIRC (trapezoidal in Cartesian space; an arc by centre or interim point)",
+          "url": "https://moveit.picknik.ai/main/doc/how_to_guides/pilz_industrial_motion_planner/pilz_industrial_motion_planner.html"
+        },
+        {
+          "citation": "Robotics Toolbox for Python: jtraj, mtraj, ctraj, mstraj, trapezoidal, quintic",
+          "url": "https://petercorke.github.io/robotics-toolbox-python/arm_trajectory.html"
+        },
+        {
+          "citation": "Lynch & Park, Modern Robotics, ch. 9: trapezoidal, S-curve, cubic and quintic time scaling",
+          "url": "https://hades.mech.northwestern.edu/images/2/25/MR-v2.pdf"
+        }
+      ],
+      "priority": "now",
+      "notes": "Zach 11-18: 'What about like multi waypoint trajectories?' minimum_jerk_move takes fractions of the room around its start; this takes absolute configurations (a pose library, READY, a calibration set).",
+      "dimensions": [
+        "2D",
+        "3D",
+        "6D"
+      ],
+      "joint_trajectory": true,
+      "defined_in": "joint",
+      "entry_level": "joint_limits",
+      "entry_extras": []
+    },
+    {
       "id": "trapezoidal_velocity",
       "name": "Trapezoidal velocity move",
       "family": "point_to_point",
@@ -2365,6 +2429,185 @@
       ],
       "priority": "next",
       "notes": "",
+      "dimensions": [
+        "1D"
+      ],
+      "joint_trajectory": true,
+      "defined_in": "cartesian",
+      "entry_level": "kinematics",
+      "entry_extras": []
+    },
+    {
+      "id": "cartesian_waypoints",
+      "name": "Cartesian waypoints",
+      "family": "point_to_point",
+      "one_line": "The tool visits a list of points or poses and dwells at each; inverse kinematics at the points only, joint-space legs between them (the tool does not move straight between points).",
+      "use_cases": [
+        "tracking_eval",
+        "stop_accuracy",
+        "accuracy",
+        "cycle_time",
+        "demo"
+      ],
+      "space": "cartesian",
+      "starts_as": "path",
+      "scope": "coordinated_multi_joint",
+      "output": "joint_trajectory",
+      "needs": [
+        "joint_limits",
+        "velocity_limits",
+        "acceleration_limits",
+        "forward_kinematics",
+        "inverse_kinematics"
+      ],
+      "parameters": [
+        {
+          "name": "peak_speed_fraction",
+          "unit": "1",
+          "default": 0.5
+        },
+        {
+          "name": "dwell_s",
+          "unit": "s",
+          "default": 0.2
+        }
+      ],
+      "segments_join": "starts_and_ends_at_rest",
+      "exists_in": [
+        "src/core/mdp/agent/actor/trajectory_generation/bam_traj_gen/src/bam_traj_gen/traj_generator.py:546"
+      ],
+      "prior_art": [
+        {
+          "citation": "MoveIt 2 Move Group interface tutorial: pose goals, joint-space goals and computeCartesianPath (waypoints interpolated at eef_step, IK at every step)",
+          "url": "https://moveit.picknik.ai/main/doc/examples/move_group_interface/move_group_interface_tutorial.html"
+        },
+        {
+          "citation": "MoveIt 2 Pilz industrial motion planner: PTP (trapezoidal joint profiles, synchronised), LIN and CIRC (trapezoidal in Cartesian space; an arc by centre or interim point)",
+          "url": "https://moveit.picknik.ai/main/doc/how_to_guides/pilz_industrial_motion_planner/pilz_industrial_motion_planner.html"
+        }
+      ],
+      "priority": "next",
+      "notes": "The Cartesian twin of joint_waypoints: MoveIt's pose goals in a row. cartesian_straight_line is the straight-line version.",
+      "dimensions": [
+        "2D",
+        "3D",
+        "6D"
+      ],
+      "joint_trajectory": true,
+      "defined_in": "cartesian",
+      "entry_level": "kinematics",
+      "entry_extras": []
+    },
+    {
+      "id": "cartesian_arc",
+      "name": "Circular arc of the tool (CIRC)",
+      "family": "point_to_point",
+      "one_line": "The tool moves on a circular arc from where it is to a goal, the arc set by its centre or by a point it passes through, at rest at both ends, inverse kinematics at every step.",
+      "use_cases": [
+        "tracking_eval",
+        "accuracy",
+        "demo"
+      ],
+      "space": "cartesian",
+      "starts_as": "path",
+      "scope": "cartesian_path",
+      "output": "joint_trajectory",
+      "needs": [
+        "joint_limits",
+        "velocity_limits",
+        "acceleration_limits",
+        "forward_kinematics",
+        "inverse_kinematics"
+      ],
+      "parameters": [
+        {
+          "name": "interim_or_centre",
+          "unit": "text",
+          "default": "interim"
+        },
+        {
+          "name": "peak_speed_fraction",
+          "unit": "1",
+          "default": 0.5
+        }
+      ],
+      "segments_join": "starts_and_ends_at_rest",
+      "exists_in": [],
+      "prior_art": [
+        {
+          "citation": "MoveIt 2 Pilz industrial motion planner: PTP (trapezoidal joint profiles, synchronised), LIN and CIRC (trapezoidal in Cartesian space; an arc by centre or interim point)",
+          "url": "https://moveit.picknik.ai/main/doc/how_to_guides/pilz_industrial_motion_planner/pilz_industrial_motion_planner.html"
+        },
+        {
+          "citation": "ISO 9283:1998, Manipulating industrial robots: performance criteria and related test methods (iso.org page not opened)",
+          "url": "https://www.iso.org/standard/22244.html"
+        }
+      ],
+      "priority": "next",
+      "notes": "Pilz's CIRC. circular_test is the full closed circle measured as a ballbar; this is the arc move of the 6-DOF family.",
+      "dimensions": [
+        "2D"
+      ],
+      "joint_trajectory": true,
+      "defined_in": "cartesian",
+      "entry_level": "kinematics",
+      "entry_extras": []
+    },
+    {
+      "id": "approach_retreat",
+      "name": "Approach and retreat along the tool axis",
+      "family": "point_to_point",
+      "one_line": "A straight tool move along its own axis to a pose and back out (or out only): the short linear legs before and after a point, held to the tool's orientation.",
+      "use_cases": [
+        "tracking_eval",
+        "stop_accuracy",
+        "cycle_time",
+        "contact_eval"
+      ],
+      "space": "cartesian",
+      "starts_as": "path",
+      "scope": "cartesian_path",
+      "output": "joint_trajectory",
+      "needs": [
+        "joint_limits",
+        "velocity_limits",
+        "acceleration_limits",
+        "forward_kinematics",
+        "inverse_kinematics"
+      ],
+      "parameters": [
+        {
+          "name": "distance_m",
+          "unit": "m",
+          "default": 0.05
+        },
+        {
+          "name": "peak_speed_fraction",
+          "unit": "1",
+          "default": 0.3
+        },
+        {
+          "name": "dwell_s",
+          "unit": "s",
+          "default": 0.3
+        }
+      ],
+      "segments_join": "starts_and_ends_at_rest",
+      "exists_in": [
+        "src/core/mdp/agent/actor/trajectory_generation/bam_reach/src/bam_reach/trajectory_dataset.py:145"
+      ],
+      "prior_art": [
+        {
+          "citation": "MoveIt 2 Pilz industrial motion planner: PTP (trapezoidal joint profiles, synchronised), LIN and CIRC (trapezoidal in Cartesian space; an arc by centre or interim point)",
+          "url": "https://moveit.picknik.ai/main/doc/how_to_guides/pilz_industrial_motion_planner/pilz_industrial_motion_planner.html"
+        },
+        {
+          "citation": "MoveIt 2 Move Group interface tutorial: pose goals, joint-space goals and computeCartesianPath (waypoints interpolated at eef_step, IK at every step)",
+          "url": "https://moveit.picknik.ai/main/doc/examples/move_group_interface/move_group_interface_tutorial.html"
+        }
+      ],
+      "priority": "next",
+      "notes": "bam_reach's pick_and_lift recipe is an approach plus a retreat; the axis is the tool's own z unless one is given.",
       "dimensions": [
         "1D"
       ],
@@ -3832,7 +4075,8 @@
         "tracking_eval",
         "stop_accuracy",
         "contact_eval",
-        "demo"
+        "demo",
+        "conveyor_pick_and_place"
       ],
       "space": "cartesian",
       "starts_as": "path",
@@ -3902,6 +4146,168 @@
       ]
     },
     {
+      "id": "moving_target_track",
+      "name": "Approach and track a moving point",
+      "family": "task_cycle",
+      "one_line": "From rest, meet a point that moves (a pose as a function of time) at the sync time with its velocity matched, then follow it within tolerance to the end of the sync window, then come to rest.",
+      "use_cases": [
+        "tracking_eval",
+        "conveyor_pick_and_place",
+        "cycle_time"
+      ],
+      "space": "cartesian",
+      "starts_as": "path",
+      "scope": "cartesian_path",
+      "output": "joint_trajectory",
+      "needs": [
+        "joint_limits",
+        "velocity_limits",
+        "acceleration_limits",
+        "forward_kinematics",
+        "inverse_kinematics"
+      ],
+      "parameters": [
+        {
+          "name": "sync_start_s",
+          "unit": "s",
+          "default": 1.0
+        },
+        {
+          "name": "sync_end_s",
+          "unit": "s",
+          "default": 2.0
+        },
+        {
+          "name": "tolerance_m",
+          "unit": "m",
+          "default": 0.001
+        }
+      ],
+      "segments_join": "starts_and_ends_at_rest",
+      "exists_in": [
+        "src/core/mdp/agent/actor/policy/bam_grasp/src/bam_grasp/conveyor.py:72",
+        "/home/bam/robot_controllers/src/robot_controllers/bench/rungs.py:336"
+      ],
+      "prior_art": [],
+      "priority": "next",
+      "notes": "Zach 11-18: 'You can account for like trajectory points that are moving'. Contract and ruler: robot_trajectories.moving (synchronised). bam_grasp's conveyor leads the target by 0.25 s to cancel servo lag.",
+      "dimensions": [
+        "1D",
+        "2D",
+        "3D",
+        "6D"
+      ],
+      "joint_trajectory": true,
+      "defined_in": "cartesian",
+      "entry_level": "kinematics",
+      "entry_extras": []
+    },
+    {
+      "id": "track_and_release",
+      "name": "Track, then leave a moving point",
+      "family": "task_cycle",
+      "one_line": "Already moving with a point, keep with it for a dwell in its frame, then leave it along a direction to rest: the second half of a moving-target cycle.",
+      "use_cases": [
+        "tracking_eval",
+        "conveyor_pick_and_place"
+      ],
+      "space": "cartesian",
+      "starts_as": "path",
+      "scope": "cartesian_path",
+      "output": "joint_trajectory",
+      "needs": [
+        "joint_limits",
+        "velocity_limits",
+        "acceleration_limits",
+        "forward_kinematics",
+        "inverse_kinematics"
+      ],
+      "parameters": [
+        {
+          "name": "dwell_s",
+          "unit": "s",
+          "default": 0.3
+        },
+        {
+          "name": "leave_m",
+          "unit": "m",
+          "default": 0.05
+        }
+      ],
+      "segments_join": "starts_and_ends_at_rest",
+      "exists_in": [
+        "src/core/mdp/agent/actor/policy/bam_grasp/src/bam_grasp/conveyor.py:72"
+      ],
+      "prior_art": [],
+      "priority": "later",
+      "notes": "",
+      "dimensions": [
+        "1D",
+        "2D",
+        "3D",
+        "6D"
+      ],
+      "joint_trajectory": true,
+      "defined_in": "cartesian",
+      "entry_level": "kinematics",
+      "entry_extras": []
+    },
+    {
+      "id": "moving_pick_and_place",
+      "name": "U between points that move",
+      "family": "task_cycle",
+      "one_line": "The U of pick_and_place_cycle (approach, down, dwell, up, over, down, dwell, up) where the first point moves: down and up are tracked in the point's frame, synchronised at the bottom.",
+      "use_cases": [
+        "conveyor_pick_and_place",
+        "cycle_time",
+        "tracking_eval"
+      ],
+      "space": "cartesian",
+      "starts_as": "path",
+      "scope": "coordinated_multi_joint",
+      "output": "joint_trajectory",
+      "needs": [
+        "joint_limits",
+        "velocity_limits",
+        "acceleration_limits",
+        "forward_kinematics",
+        "inverse_kinematics"
+      ],
+      "parameters": [
+        {
+          "name": "lift_m",
+          "unit": "m",
+          "default": 0.05
+        },
+        {
+          "name": "sync_window_s",
+          "unit": "s",
+          "default": 0.5
+        },
+        {
+          "name": "tolerance_m",
+          "unit": "m",
+          "default": 0.001
+        }
+      ],
+      "segments_join": "starts_and_ends_at_rest",
+      "exists_in": [
+        "src/core/mdp/agent/actor/policy/bam_grasp/src/bam_grasp/conveyor.py:72",
+        "src/core/mdp/agent/actor/trajectory_generation/bam_reach/src/bam_reach/trajectory_dataset.py:49"
+      ],
+      "prior_art": [],
+      "priority": "next",
+      "notes": "bam_grasp's conveyor line delivered 19/40 on a moving belt against 30/40 static: the loss is tracking error along the belt, which this kind's sync window makes a measured, gated number.",
+      "dimensions": [
+        "3D",
+        "6D"
+      ],
+      "joint_trajectory": true,
+      "defined_in": "cartesian",
+      "entry_level": "kinematics",
+      "entry_extras": []
+    },
+    {
       "id": "adept_cycle",
       "name": "Adept cycle",
       "family": "task_cycle",
@@ -3969,7 +4375,8 @@
       "use_cases": [
         "contact_eval",
         "pid_tuning",
-        "tracking_eval"
+        "tracking_eval",
+        "conveyor_pick_and_place"
       ],
       "space": "cartesian",
       "starts_as": "path",

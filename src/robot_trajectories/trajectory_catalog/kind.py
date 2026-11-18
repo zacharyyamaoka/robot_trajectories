@@ -101,6 +101,7 @@ USE_CASE_TAGS: tuple[str, ...] = (
     "collision_check",
     "cycle_time",
     "demo",
+    "conveyor_pick_and_place",
 )
 
 # Where the kind is authored. A torque kind is NOT a position JointTrajectory: it is played open loop (kp = kd = 0, or a current).

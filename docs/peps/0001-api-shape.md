@@ -1,6 +1,9 @@
 # PEP 0001: the API shape — the recommended splice of the 2026-11-18 round
 
-- **Status:** Accepted as the AI default 2026-11-18, pending Zach's pick. Taken under his standing rule for reversible work
+> **Superseded by [PEP 0002](0002-signal-library.md)** (2026-11-18): Zach picked the V1 signal library. This record is kept as
+> the history of the round; the package it describes is `main` @ `138fc43` (0.0.1).
+
+- **Status:** Superseded by 0002. Was: accepted as the AI default 2026-11-18, pending Zach's pick. Taken under his standing rule for reversible work
   ("your recommendation is the default, take it"), so switching later is cheap: see "Switching to one parent" below. Undo:
   the repo is local and private; `git revert` any commit, or delete `/home/bam/robot_trajectories`.
 - **Ask:** Zach, Daily Note 2026-11-18: "You pass in a robot description and a configuration, and then you get out like a
