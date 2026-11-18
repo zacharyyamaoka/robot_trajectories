@@ -253,7 +253,8 @@ def station_pieces(space, start: np.ndarray, stations: list[np.ndarray], law, *,
     here = np.asarray(start, float)
     for index, q in enumerate(stations, start=1):
         if not np.allclose(here, q, atol=1e-12):
-            pieces.append(law.leg(here, q, space.limits, space.rate_hz, label=f"{label}: move to station {index}"))
+            pieces.append(law.leg(here, q, space.limits, space.rate_hz, label=f"{label}: move to station {index}",
+                                  dynamics=space.dynamics))
         pieces.append(dwell(index, q))
         here = q
     return pieces

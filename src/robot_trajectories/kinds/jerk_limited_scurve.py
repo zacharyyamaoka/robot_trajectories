@@ -44,4 +44,4 @@ def jerk_limited_scurve(space, joint=None, *, targets_fraction=(0.5, -0.5), velo
         rows.append(row)
     if back_to_start:
         rows.append(start.copy())
-    return legs_through(start, rows, law, space.limits, space.rate_hz, dwell_s=dwell_s, label=label)
+    return legs_through(start, rows, law, space.limits, space.rate_hz, dwell_s=dwell_s, label=label, dynamics=space.dynamics)

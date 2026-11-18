@@ -31,7 +31,8 @@ def weightless_float(space, *, float_s=5.0, hold_s=1.0, poses=5, seed=11, time_l
     samples = int(round(float_s * space.rate_hz)) + 1
     for index, q in enumerate(stations, start=1):
         if not np.allclose(here, q, atol=1e-12):
-            pieces.append(time_law.leg(here, q, space.limits, space.rate_hz, label=f"{label}: move to station {index}"))
+            pieces.append(time_law.leg(here, q, space.limits, space.rate_hz, label=f"{label}: move to station {index}",
+                                           dynamics=space.dynamics))
         pieces.append(k.hold(q, hold_s, space.rate_hz, label=f"{label}: station {index} held"))
         swing = b.predict_until(space, q, lambda i, position, velocity: b.hold_effort(space, position), samples)
         pieces.append(b.Piece(np.arange(len(swing[0])) / space.rate_hz, swing[0], swing[1], swing[2],

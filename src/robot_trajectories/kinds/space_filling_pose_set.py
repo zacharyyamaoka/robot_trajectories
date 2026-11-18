@@ -53,7 +53,7 @@ def space_filling_pose_set(space, count=64, *, method="sobol", seed=0, order="ne
     here = start
     left_out = 0
     for q in configs:
-        leg = time_law.leg(here, q, space.limits, space.rate_hz, label=f"{label}: leg {len(stations) + 1}")
+        leg = time_law.leg(here, q, space.limits, space.rate_hz, label=f"{label}: leg {len(stations) + 1}", dynamics=space.dynamics)
         if space.checks_collision and any(space.in_collision(row) for row in leg.q[::5]):
             left_out += 1
             continue

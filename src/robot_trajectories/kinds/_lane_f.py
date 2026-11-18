@@ -469,7 +469,7 @@ def approach(space: JointSpace, start: Any, arrive: State, steps: int, law: Time
     end = BoundaryState(np.asarray(arrive.qd, float), np.asarray(arrive.qdd, float))
     notes: list[str] = []
     try:
-        leg = law.leg(start, arrive.q, space.limits, rate, label=label, end_state=end)
+        leg = law.leg(start, arrive.q, space.limits, rate, label=label, end_state=end, dynamics=space.dynamics)
     except ValueError:
         leg = None
     if leg is None or len(leg.t) - 1 > steps:
@@ -536,7 +536,7 @@ def law_steps(space: JointSpace, law: TimeLaw, q0: Any, q1: Any) -> int:
     """The samples a rest-to-rest leg q0 -> q1 takes under ``law`` (a duration to start a fit from)."""
     if law.built_in:
         return math.ceil(law.leg_timing(np.asarray(q0, float), np.asarray(q1, float), space.limits).duration_s * space.rate_hz - 1e-9)
-    return len(law.leg(q0, q1, space.limits, space.rate_hz).t) - 1
+    return len(law.leg(q0, q1, space.limits, space.rate_hz, dynamics=space.dynamics).t) - 1
 
 
 def braking_steps(space: JointSpace, qd: Any) -> int:

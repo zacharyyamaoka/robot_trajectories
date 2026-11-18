@@ -46,7 +46,7 @@ def cartesian_a_to_b(space, goal=None, *, via=(), n_intermediate_points=0, seed=
     here_q, here_point = start, space.forward(start)[:3, 3]
 
     def leg_to(q: np.ndarray, point: np.ndarray, name: str) -> list[k.Arrays]:
-        leg = time_law.leg(here_q, q, space.limits, space.rate_hz, label=f"{label}: {name}")
+        leg = time_law.leg(here_q, q, space.limits, space.rate_hz, label=f"{label}: {name}", dynamics=space.dynamics)
         target = np.full((len(leg.t), 3), np.nan)
         target[-1] = point  # WHY only the last row: between poses the tool's path is not commanded
         out: list[k.Arrays] = [Piece(leg.t, leg.q, leg.qd, leg.qdd, leg.label, channels={TOOL_TARGET: target})]
@@ -60,7 +60,7 @@ def cartesian_a_to_b(space, goal=None, *, via=(), n_intermediate_points=0, seed=
         solutions = solve_points(space, start, targets, what=label, tolerance_m=tolerance_m)
         for index, (q, target) in enumerate(zip(solutions, targets, strict=True), start=1):
             name = "leg to the goal" if index == len(targets) else f"leg to via {index}"
-            leg = time_law.leg(here_q, q, space.limits, space.rate_hz, label="check")
+            leg = time_law.leg(here_q, q, space.limits, space.rate_hz, label="check", dynamics=space.dynamics)
             row = _leaves_reach(space, leg)
             if row is not None:
                 raise Unreachable(label, index=index, count=len(targets), point=target[:3, 3],
@@ -86,7 +86,7 @@ def cartesian_a_to_b(space, goal=None, *, via=(), n_intermediate_points=0, seed=
             if solved is None or float(np.linalg.norm(space.forward(solved)[:3, 3] - pose[:3, 3])) > tolerance_m \
                     or np.any(solved < space.bounds.low - 1e-9) or np.any(solved > space.bounds.high + 1e-9):
                 continue
-            leg = time_law.leg(here_q, solved, space.limits, space.rate_hz, label="check")
+            leg = time_law.leg(here_q, solved, space.limits, space.rate_hz, label="check", dynamics=space.dynamics)
             if _leaves_reach(space, leg) is not None:
                 continue
             pieces += leg_to(solved, pose[:3, 3], name)

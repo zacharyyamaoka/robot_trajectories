@@ -29,7 +29,7 @@ def cartesian_waypoints(space, points_or_poses, *, time_law=TimeLaw.minimum_jerk
     pieces: list[k.Arrays] = []
     here = start
     for index, (q, point) in enumerate(stops, start=1):
-        leg = time_law.leg(here, q, space.limits, space.rate_hz, label=f"{label}: leg {index}")
+        leg = time_law.leg(here, q, space.limits, space.rate_hz, label=f"{label}: leg {index}", dynamics=space.dynamics)
         target = np.full((len(leg.t), 3), np.nan)
         target[-1] = point  # WHY only the last row: between points the tool's path is not commanded
         pieces.append(Piece(leg.t, leg.q, leg.qd, leg.qdd, leg.label, channels={TOOL_TARGET: target}))

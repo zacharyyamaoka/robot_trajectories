@@ -334,6 +334,69 @@ def test_a_time_law_that_needs_the_dynamics_is_handed_the_space_s():
         raise AssertionError("a backend handed the dynamics returned motion over max_effort, and it was used")
 
 
+class _AlwaysNeedsDynamics(_NeedsDynamics):
+    """The same probe with a static ``needs`` tuple naming the dynamics: every leg it times must be handed the space's model."""
+
+    name = "contract_always_dynamics"
+    needs = ("dynamics_model",)
+
+
+# WHY listed: input_shaped_move shapes a built-in law's closed-form profile and refuses a plugin law by name, so no backend runs
+NO_PLUGIN_LAW = {"input_shaped_move"}
+
+
+def test_every_kind_that_takes_a_time_law_hands_the_backend_the_space_s_dynamics():
+    from fixtures import lane_b
+
+    import robot_trajectories as rt
+
+    probe = _AlwaysNeedsDynamics()
+    register_time_law(probe, provider="contract-test")
+    law = TimeLaw("contract_always_dynamics", peak_speed_fraction=0.5)
+    pendulum, five, arm = lane_b.pendulum_space(), lane_b.fivebar_space(), lane_b.ur5e_space()  # each with dynamics and max_effort
+    tool = arm.forward(arm.home)[:3, 3]
+    calls = {
+        "move": lambda: rt.move(pendulum, time_law=law),
+        "joint_waypoints": lambda: rt.joint_waypoints(pendulum, [[0.1], [-0.1]], time_law=law),
+        "repeat_floor_tape": lambda: rt.repeat_floor_tape(pendulum, time_law=law),
+        "via_point_spline": lambda: rt.via_point_spline(pendulum, time_law=law),
+        "speed_ladder": lambda: rt.speed_ladder(pendulum, shape="contract_always_dynamics"),
+        "space_filling_pose_set": lambda: rt.space_filling_pose_set(arm, time_law=law),
+        "cartesian_path": lambda: rt.cartesian_path(arm, [tool + (0.05, 0.0, 0.0)], time_law=law),
+        "cartesian_waypoints": lambda: rt.cartesian_waypoints(arm, [tool + (0.05, 0.0, 0.0)], time_law=law),
+        "cartesian_a_to_b": lambda: rt.cartesian_a_to_b(arm, tool + (0.05, 0.05, -0.05), via=(tuple(tool + (0.05, 0.0, 0.0)),), time_law=law),
+        "cartesian_arc": lambda: rt.cartesian_arc(arm, time_law=law),
+        "approach_retreat": lambda: rt.approach_retreat(arm, time_law=law),
+        "adept_cycle": lambda: rt.adept_cycle(arm, time_law=law),
+        "pick_and_place": lambda: rt.pick_and_place(arm, tool + (0.08, -0.08, -0.12), tool + (-0.08, 0.10, -0.12), lift_m=0.08,
+                                                     time_law=law, approach_time_law=law),
+        "kinematic_calibration_pose_set": lambda: rt.kinematic_calibration_pose_set(arm, time_law=law),
+        "camera_board_views": lambda: rt.camera_board_views(arm, time_law=law),
+        "hand_eye_station_set": lambda: rt.hand_eye_station_set(arm, time_law=law),
+        "power_up_random_rests": lambda: rt.power_up_random_rests(five, time_law=law),
+        "quasi_static_pose_holds": lambda: rt.quasi_static_pose_holds(five, time_law=law),
+        "weightless_float": lambda: rt.weightless_float(five, time_law=law),
+        "moving_target_track": lambda: rt.moving_target_track(arm, time_law=law),
+        "meet_moving_point": lambda: rt.meet_moving_point(arm, time_law=law),
+        "track_and_release": lambda: rt.track_and_release(arm, time_law=law, start=rt.meet_moving_point(arm)),
+        "moving_pick_and_place": lambda: rt.moving_pick_and_place(arm, time_law=law, approach_time_law=law),
+    }
+    takes_a_law = {name for name, info in rt.kinds().items() if "time_law" in info.parameters or name == "speed_ladder"}
+    missing = sorted(takes_a_law - set(calls) - NO_PLUGIN_LAW - {"envelope_challenge"})
+    assert not missing, f"kinds that take a time law but are not held to hand it the dynamics here: {missing}"
+    unreached = []
+    for name, call in calls.items():
+        probe.handed.clear()
+        try:
+            call()
+        except MissingRung:  # the seam refused: the kind timed a leg without handing the dynamics on
+            unreached.append(name)
+            continue
+        if not probe.handed or any(entry.get("dynamics") is None for entry in probe.handed):
+            unreached.append(name)
+    assert not unreached, f"the time-law backend was not handed the space's dynamics by: {unreached}"
+
+
 # ---------------------------------------------------------------------- injected slots: dynamics, effort, collision
 
 

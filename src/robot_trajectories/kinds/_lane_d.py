@@ -114,7 +114,7 @@ def pose_set(space: Any, label: str, start: np.ndarray, stations: Sequence[np.nd
         if via is not None and space.kinematics is not None and not line_clear(space, here, target, room):
             legs.insert(0, (np.asarray(via, float), f"{label}: leg via the start to station {index}"))
         for goal, leg_label in legs:
-            leg = law.leg(here, goal, space.limits, space.rate_hz, label=leg_label)
+            leg = law.leg(here, goal, space.limits, space.rate_hz, label=leg_label, dynamics=space.dynamics)
             tool = np.full((len(leg.t), 3), np.nan)
             if point is not None and goal is target:
                 tool[-1] = point

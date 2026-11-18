@@ -73,7 +73,7 @@ def speed_ladder(space, joint=None, *, rung_fractions=RUNG_FRACTIONS, repeats=5,
 
     limits, rate = space.limits, space.rate_hz
     prelude = TimeLaw(shape, peak_speed_fraction=PRELUDE_SPEED_FRACTION)
-    pieces = [prelude.leg(start, at(a0), limits, rate, label=f"{label}: to A")]
+    pieces = [prelude.leg(start, at(a0), limits, rate, label=f"{label}: to A", dynamics=space.dynamics)]
     here = at(a0)
     clamped = []
     for rung, law in enumerate(time_laws(rung_fractions, shape)):
@@ -89,14 +89,14 @@ def speed_ladder(space, joint=None, *, rung_fractions=RUNG_FRACTIONS, repeats=5,
         for a, b, what in pairs:
             band = f"{label}: {percent} {what}"
             if not np.isclose(here[joint], a):
-                pieces.append(prelude.leg(here, at(a), limits, rate, label=f"{band}: to A"))
+                pieces.append(prelude.leg(here, at(a), limits, rate, label=f"{band}: to A", dynamics=space.dynamics))
             # the same path, this rung's time law: A -> B (dwell) -> A (dwell)
-            pieces += [law.leg(at(a), at(b), limits, rate, label=f"{band}: A to B"),
+            pieces += [law.leg(at(a), at(b), limits, rate, label=f"{band}: A to B", dynamics=space.dynamics),
                        k.hold(at(b), dwell_s, rate, label=f"{band}: dwell at B"),
-                       law.leg(at(b), at(a), limits, rate, label=f"{band}: B to A"),
+                       law.leg(at(b), at(a), limits, rate, label=f"{band}: B to A", dynamics=space.dynamics),
                        k.hold(at(a), dwell_s, rate, label=f"{band}: dwell at A")]
             here = at(a)
-    pieces.append(prelude.leg(here, start, limits, rate, label=f"{label}: back to start"))
+    pieces.append(prelude.leg(here, start, limits, rate, label=f"{label}: back to start", dynamics=space.dynamics))
     note = (f"{label}: A/B {math.degrees(a0):+.1f}° / {math.degrees(b0):+.1f}° on {name}; "
             + ("; ".join(clamped) + ": a limit binds before the rung's speed" if clamped else "every rung reaches its speed"))
     return Motion(pieces, [note])

@@ -118,7 +118,7 @@ def via_point_spline(space, via_points=None, *, interpolation="blend", blend_rad
             grid = np.linspace(0.0, 1.0, len(path))
         law = time_law
         for _ in range(20):
-            timed = law.along(path, space.limits, space.rate_hz, label=name, progress_grid=grid)
+            timed = law.along(path, space.limits, space.rate_hz, label=name, progress_grid=grid, dynamics=space.dynamics)
             # WHY the output is read again, the way the guard reads it (differences of the sampled velocity): a time law reads a
             # path's slope and curvature on its grid, and where the path turns tightly (a blend radius small against the legs)
             # that differs from the sampled motion by a few percent; the run is slowed until the sampled motion fits
@@ -128,8 +128,9 @@ def via_point_spline(space, via_points=None, *, interpolation="blend", blend_rad
             factor = max(accel**0.5 if accel > 1.0 else 1.0, jerk ** (1.0 / 3.0) if jerk > 1.0 else 1.0)
             if factor <= 1.0:
                 break
+            # WHY the options carried over: a plugin law's settings (TOPP-RA's effort_fraction) must survive the slowing
             law = TimeLaw(time_law.shape, move_s=float(timed.arrays.t[-1]) * factor * 1.01, ramp_fraction=time_law.ramp_fraction,
-                          min_move_s=time_law.min_move_s)
+                          min_move_s=time_law.min_move_s, options=time_law.options)
         else:
             raise ValueError("via_point_spline: no timing keeps this path inside the acceleration and jerk limits in 20 slowings")
         pieces.append(timed.arrays)
