@@ -62,6 +62,10 @@ def claims() -> tuple[tuple[bool, str], ...]:
     joint_of = {"pendulum": "can11", "five-bar": "j2", "UR5e": "elbow_joint"}
     for robot, space in spaces.items():
         for name, info in kinds().items():
+            # WHY: test files register deliberately broken kinds (tests/test_contract.py's contract_too_fast);
+            # in one pytest process they share the registry, so check shipped and plugin kinds only.
+            if info.module.split(".")[0] in ("tests", "conftest") or info.module.split(".")[-1].startswith("test_"):
+                continue
             joint = joint_of[robot]
             if name in CARTESIAN:
                 try:
