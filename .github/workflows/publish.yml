@@ -8,15 +8,9 @@ on:
     tags: ["v*"]
   workflow_dispatch:
 jobs:
+  # WHY: the release gate is the exact CI that went green, both numpy SIMD tiers included (2026-11-23)
   test:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
-      - run: uv run --isolated --no-sources --extra test python -m pytest -q
-        env:
-          MPLBACKEND: Agg
+    uses: ./.github/workflows/test.yml
   publish:
     needs: test
     runs-on: ubuntu-latest
