@@ -17,7 +17,7 @@ import numpy as np
 
 import scenario
 from fixtures import reference, robots
-from robot_trajectories import (JointSpace, MissingRung, TimeParameterization, bands, catalog, kinds, labels, move, notes,
+from robot_trajectories import (JointSpace, MissingRung, WaypointTrajectoryGenerator, bands, catalog, kinds, labels, move, notes,
                                 pid_tuning, rebuild, recipe, repeat, segment_info, speed_ladder, split, trajectory_catalog)
 
 CARTESIAN = {"cartesian_path", "cartesian_waypoints", "pick_and_place"}
@@ -100,10 +100,10 @@ def claims() -> tuple[tuple[bool, str], ...]:
             again = rebuild(trajectory, space)
             claim(np.array_equal(again.positions, trajectory.positions), f"{robot}: {name} rebuilds from its recipe, sample for sample")
 
-    # 3. the speed ladder is one path under several time parameterizations; the acceleration clamp is reported -------------------
+    # 3. the speed ladder is one path under several waypoint trajectory generators; the acceleration clamp is reported -------------------
     ladder_module = importlib.import_module("robot_trajectories.kinds.speed_ladder")
-    claim([law.peak_speed_fraction for law in ladder_module.time_parameterizations()] == [0.2, 0.4, 0.6, 0.8, 0.9, 1.0],
-          "speed_ladder: one TimeParameterization per rung")
+    claim([law.peak_speed_fraction for law in ladder_module.waypoint_trajectory_generators()] == [0.2, 0.4, 0.6, 0.8, 0.9, 1.0],
+          "speed_ladder: one WaypointTrajectoryGenerator per rung")
     pendulum = spaces["pendulum"]
     ladder = speed_ladder(pendulum, "can11")
     legs = [band for band in bands(ladder) if band.label.endswith("A to B")]
@@ -113,19 +113,19 @@ def claims() -> tuple[tuple[bool, str], ...]:
     held = [band.label for band in legs if "held out" in band.label]
     claim(held[0].endswith("(seed 0): A to B") and "seed 51" in held[-1], f"ladder: held-out seeds are round x 1000 + rung x 10 + k ({held[0]!r} ... {held[-1]!r})")
     claim(any("acceleration-bound" in note for note in notes(ladder)), "ladder: rungs above what the acceleration allows are noted")
-    timing = TimeParameterization.minimum_jerk(peak_speed_fraction=1.0).leg_timing(np.array([-0.24]), np.array([0.24]),
+    timing = WaypointTrajectoryGenerator.minimum_jerk(peak_speed_fraction=1.0).leg_timing(np.array([-0.24]), np.array([0.24]),
                                                                                    pendulum.limits)
     claim(timing.bound == "acceleration" and timing.peak_speed_fraction < 0.8,
-          f"TimeParameterization clamps to the acceleration limit ({timing})")
+          f"WaypointTrajectoryGenerator clamps to the acceleration limit ({timing})")
     try:
-        TimeParameterization("ruckig", peak_speed_fraction=0.5)
-        claim(False, "a time parameterization with no backend installed is refused")
+        WaypointTrajectoryGenerator("ruckig", peak_speed_fraction=0.5)
+        claim(False, "a waypoint trajectory generator with no backend installed is refused")
     except ValueError as error:
-        claim("robot_trajectories.time_parameterizations" in str(error) and "lane E" in str(error),
-              "a time parameterization with no backend is refused, naming the entry-point group to install one under")
-    trapezoid = move(pendulum, "can11", time_parameterization=TimeParameterization.trapezoid(peak_speed_fraction=0.8))
+        claim("robot_trajectories.waypoint_trajectory_generators" in str(error) and "lane E" in str(error),
+              "a waypoint trajectory generator with no backend is refused, naming the entry-point group to install one under")
+    trapezoid = move(pendulum, "can11", waypoint_generator=WaypointTrajectoryGenerator.trapezoid(peak_speed_fraction=0.8))
     claim(not inside(trapezoid, pendulum.limits),
-          "a trapezoid time parameterization runs inside every limit (built in since 0.1.0)")
+          "a trapezoid waypoint trajectory generator runs inside every limit (built in since 0.1.0)")
 
     # 4. the constant-speed chirp: bigger at low frequency than the shared one -------------------------------------------------------
     week_chirp = kinds()["linear_chirp"].function(pendulum, "can11", f_start_hz=0.2, f_end_hz=5.0, hold_after_s=0.0)

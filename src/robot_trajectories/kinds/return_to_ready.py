@@ -8,7 +8,7 @@ import numpy as np
 from .. import kernels as k
 from ..registry import LIMITS, kind
 from ..segments import Motion
-from ..time_parameterization import TimeParameterization
+from ..waypoint_trajectory_generator import WaypointTrajectoryGenerator
 from ._lane_d import forward_or_none
 
 # Ported from bam_ws src/dev/bam_fivebar_recovery/bam_fivebar_recovery/home.py (straight_waypoints :87, path_home :133, walk_home_sequence
@@ -127,10 +127,10 @@ def return_to_ready(space, *, waypoint_step_rad=0.087, speed_rad_s=0.1, settle_s
                                  f"of the limits is clear")
         checked = sum(len(straight_waypoints(a, b, check_step)) for a, b in zip(route[:-1], route[1:], strict=True))
     pieces: list[k.Arrays] = []
-    ramp = TimeParameterization.trapezoid(move_s=1.0).ramp_fraction
+    ramp = WaypointTrajectoryGenerator.trapezoid(move_s=1.0).ramp_fraction
     for index, (a, b) in enumerate(zip(route[:-1], route[1:], strict=True), start=1):
         distance = float(np.max(np.abs(b - a)))
-        law = TimeParameterization.trapezoid(move_s=max(distance / (speed_rad_s * (1.0 - ramp)), 0.1))
+        law = WaypointTrajectoryGenerator.trapezoid(move_s=max(distance / (speed_rad_s * (1.0 - ramp)), 0.1))
         pieces.append(law.leg(a, b, space.limits, space.rate_hz, label=f"{label}: walk {index}"))
     pieces.append(k.hold(home, max(settle_s, 0.0), space.rate_hz, label=f"{label}: settle at READY"))
     return Motion(pieces, (f"walk to READY by {how}; {checked} waypoints at most {math.degrees(check_step):.2f}° apart checked "

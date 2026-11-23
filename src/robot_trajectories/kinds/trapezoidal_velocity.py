@@ -7,7 +7,7 @@ import numpy as np
 from .. import kernels as k
 from ..registry import kind
 from ..segments import Motion
-from ..time_parameterization import TimeParameterization
+from ..waypoint_trajectory_generator import WaypointTrajectoryGenerator
 
 
 @kind(use_cases=("tracking_eval", "cycle_time"), catalog_id="trapezoidal_velocity")
@@ -19,7 +19,7 @@ def trapezoidal_velocity(space, target=None, *, velocity_fraction=1.0, accelerat
 
     ``velocity_fraction`` and ``acceleration_fraction`` scale the space's velocity and acceleration limits (Pilz's velocity and
     acceleration scaling); the move is as fast as they allow. ``target=None`` moves half way to the top of each joint's room.
-    ``dwell_s`` holds at the target, ``back_to_start`` returns. The ramps are a quarter of the leg each (``TimeParameterization.trapezoid``);
+    ``dwell_s`` holds at the target, ``back_to_start`` returns. The ramps are a quarter of the leg each (``WaypointTrajectoryGenerator.trapezoid``);
     the acceleration steps at their ends, so the jerk is unbounded: minimum-jerk (``move``, ``joint_waypoints``) is the smooth one."""
     for name, value in (("velocity_fraction", velocity_fraction), ("acceleration_fraction", acceleration_fraction)):
         if not 0.0 < value <= 1.0:
@@ -41,7 +41,7 @@ def trapezoidal_velocity(space, target=None, *, velocity_fraction=1.0, accelerat
     # limit, whichever binds first (Pilz PTP's scaling), and the guard still holds the output to the space's own limits
     scaled = k.Bounds(bounds.joint_names, bounds.low, bounds.high, bounds.max_velocity * velocity_fraction,
                       bounds.max_acceleration * acceleration_fraction)
-    law = TimeParameterization.trapezoid(peak_speed_fraction=1.0)
+    law = WaypointTrajectoryGenerator.trapezoid(peak_speed_fraction=1.0)
     pieces = [law.leg(start, goal, scaled, space.rate_hz, label=f"{label}: leg")]
     timing = law.leg_timing(start, goal, scaled)
     if dwell_s > 0:

@@ -8,25 +8,26 @@ registers itself in its own ``pyproject.toml``:
     [project.entry-points."robot_trajectories.kinds"]
     my_kinds = "my_package.kinds"                  # a module whose @kind functions register on import
 
-    [project.entry-points."robot_trajectories.time_parameterizations"]
-    ruckig = "robot_trajectories_ruckig:RuckigBackend"   # a TimeParameterizationBackend (an instance, or a no-argument class)
+    [project.entry-points."robot_trajectories.waypoint_trajectory_generators"]
+    ruckig = "robot_trajectories_ruckig:RuckigBackend"   # a WaypointTrajectoryGeneratorBackend (instance or no-argument class)
 
 The roles (prior-art note 2026-11-18, section 7: every framework cuts the same seams, and "simple vs complex" is not one):
 
 - ``robot_trajectories.kinds``: kinds, ``f(space, ..., start=None) -> JointTrajectory``, registered with ``@kind``;
-- ``robot_trajectories.time_parameterizations``: a path and limits in, a timed trajectory out
-  (``time_parameterization.TimeParameterizationBackend``): Ruckig, Ruckig Pro (a drop-in for the same name, never installed
-  beside Community), TOPP-RA. Its name before the rename of 2026-11-23, ``robot_trajectories.time_laws``, is still read: a
-  plugin built against it still loads, and a name declared in both groups is the new group's;
+- ``robot_trajectories.waypoint_trajectory_generators``: points and limits in, a timed trajectory out
+  (``waypoint_trajectory_generator.WaypointTrajectoryGeneratorBackend``): Ruckig, Ruckig Pro (a drop-in for the same name,
+  never installed beside Community), TOPP-RA. Its names before the renames of 2026-11-23, ``robot_trajectories.time_laws``
+  and then ``robot_trajectories.time_parameterizations``, are still read: a plugin built against either still loads, and a
+  name declared in more than one group is the newest group's;
 - ``robot_trajectories.planners`` (reserved, not loaded yet): start, goal and the space's collision check in, joint path
-  points out (caelan's motion-planners, OMPL, VAMP); a time parameterization then times the path;
+  points out (caelan's motion-planners, OMPL, VAMP); a waypoint trajectory generator then times the path;
 - ``robot_trajectories.optimizers`` (reserved, not loaded yet): path and timing chosen together (Drake, cuRobo, TrajOpt,
   Ruckig Pro's waypoint mode); they register as kinds that need a model.
 
 ``import robot_trajectories`` loads every installed plugin once. A plugin kind is then listed, tagged, guarded and recorded
-exactly like a built-in one (``kinds()[name].plugin`` names its distribution); a time parameterization serves
-``TimeParameterization(name, ...)``. A plugin that fails to load is reported (``errors()`` and a warning), and the rest still
-load.
+exactly like a built-in one (``kinds()[name].plugin`` names its distribution); a waypoint trajectory generator's backend
+serves ``WaypointTrajectoryGenerator(name, ...)``. A plugin that fails to load is reported (``errors()`` and a warning), and the
+rest still load.
 
 WHY entry points: the standard Python plugin mechanism (``importlib.metadata``, stdlib), so a plugin is an ordinary
 installable package and this leaf never names it (tests/test_boundary.py).
@@ -39,9 +40,15 @@ from importlib import metadata
 from typing import Any
 
 KIND_GROUP = "robot_trajectories.kinds"
-TIME_PARAMETERIZATION_GROUP = "robot_trajectories.time_parameterizations"
+WAYPOINT_TRAJECTORY_GENERATOR_GROUP = "robot_trajectories.waypoint_trajectory_generators"
+LEGACY_TIME_PARAMETERIZATION_GROUP = "robot_trajectories.time_parameterizations"  # its name for hours on 2026-11-23, still read
 LEGACY_TIME_LAW_GROUP = "robot_trajectories.time_laws"  # the group's name before 2026-11-23, still read
-TIME_LAW_GROUP = TIME_PARAMETERIZATION_GROUP  # deprecated alias (time_law.py says why): the group a plugin declares now
+# Every name the group has had, newest first: all are read, and the newest group that declares a name wins it
+WAYPOINT_TRAJECTORY_GENERATOR_GROUPS = (WAYPOINT_TRAJECTORY_GENERATOR_GROUP, LEGACY_TIME_PARAMETERIZATION_GROUP,
+                                        LEGACY_TIME_LAW_GROUP)
+# deprecated aliases (time_law.py and time_parameterization.py say why): each names the group a plugin declares now
+TIME_PARAMETERIZATION_GROUP = WAYPOINT_TRAJECTORY_GENERATOR_GROUP
+TIME_LAW_GROUP = WAYPOINT_TRAJECTORY_GENERATOR_GROUP
 PLANNER_GROUP = "robot_trajectories.planners"  # reserved: the role exists, nothing loads it yet
 OPTIMIZER_GROUP = "robot_trajectories.optimizers"  # reserved
 
@@ -59,17 +66,20 @@ def load(*, refresh: bool = False) -> list[str]:
         return list(_state["errors"])
     _state["loaded"] = True
     from . import registry
-    from .time_parameterization import register_time_parameterization
+    from .waypoint_trajectory_generator import register_waypoint_trajectory_generator
 
-    # WHY time parameterizations first: a plugin kind may build a TimeParameterization of a plugin backend when it is imported
-    current = list(metadata.entry_points(group=TIME_PARAMETERIZATION_GROUP))
-    # WHY the old group too (the rename of 2026-11-23): a plugin built before it declares robot_trajectories.time_laws and must
-    # still load. A name in both groups is the new group's: its old entry is skipped, never registered beside it as a second
-    # provider (which backend() would refuse as ambiguous)
-    declared = {point.name for point in current}
-    legacy = [point for point in metadata.entry_points(group=LEGACY_TIME_LAW_GROUP) if point.name not in declared]
-    for group, point in [*((TIME_PARAMETERIZATION_GROUP, point) for point in current),
-                         *((LEGACY_TIME_LAW_GROUP, point) for point in legacy)]:
+    # WHY waypoint trajectory generators first: a plugin kind may build a WaypointTrajectoryGenerator of a plugin backend when it
+    # is imported.
+    # WHY the older groups too (the renames of 2026-11-23): a plugin built before them declares robot_trajectories.time_laws or
+    # robot_trajectories.time_parameterizations and must still load. A name in more than one group is the newest group's: its
+    # older entries are skipped, never registered beside it as a second provider (which backend() would refuse as ambiguous)
+    declared: set[str] = set()
+    found: list[tuple[str, metadata.EntryPoint]] = []
+    for group in WAYPOINT_TRAJECTORY_GENERATOR_GROUPS:  # newest first
+        points = list(metadata.entry_points(group=group))
+        found += [(group, point) for point in points if point.name not in declared]
+        declared |= {point.name for point in points}
+    for group, point in found:
         key = (group, point.name, point.value)
         if key in _state["loaded_points"]:
             continue
@@ -77,10 +87,10 @@ def load(*, refresh: bool = False) -> list[str]:
         try:
             loaded = point.load()
             backend = loaded() if isinstance(loaded, type) else loaded
-            register_time_parameterization(backend, provider=_provider(point))
+            register_waypoint_trajectory_generator(backend, provider=_provider(point))
         except Exception as error:  # noqa: BLE001
-            _report(f"time-parameterization plugin {point.name!r} ({point.value}) failed to load: {type(error).__name__}: "
-                    f"{error}")
+            _report(f"waypoint-trajectory-generator plugin {point.name!r} ({point.value}) failed to load: "
+                    f"{type(error).__name__}: {error}")
     for point in metadata.entry_points(group=KIND_GROUP):
         key = (KIND_GROUP, point.name, point.value)
         if key in _state["loaded_points"]:
@@ -106,5 +116,6 @@ def errors() -> list[str]:
     return list(_state["errors"])
 
 
-__all__ = ["KIND_GROUP", "LEGACY_TIME_LAW_GROUP", "OPTIMIZER_GROUP", "PLANNER_GROUP", "TIME_LAW_GROUP",
-           "TIME_PARAMETERIZATION_GROUP", "errors", "load"]
+__all__ = ["KIND_GROUP", "LEGACY_TIME_LAW_GROUP", "LEGACY_TIME_PARAMETERIZATION_GROUP", "OPTIMIZER_GROUP", "PLANNER_GROUP",
+           "TIME_LAW_GROUP", "TIME_PARAMETERIZATION_GROUP", "WAYPOINT_TRAJECTORY_GENERATOR_GROUP",
+           "WAYPOINT_TRAJECTORY_GENERATOR_GROUPS", "errors", "load"]

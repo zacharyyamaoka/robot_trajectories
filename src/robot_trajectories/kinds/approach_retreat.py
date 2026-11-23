@@ -6,14 +6,14 @@ from .. import kernels as k
 from ..cartesian import tool_target_hold
 from ..registry import LIMITS, kind
 from ..segments import Motion, Piece
-from ..time_parameterization import TimeParameterization
+from ..waypoint_trajectory_generator import WaypointTrajectoryGenerator
 from ._lane_c import tool_line, with_point
 
 
 @kind(use_cases=("tracking_eval", "stop_accuracy", "cycle_time", "contact_eval"), needs=(*LIMITS, "forward_kinematics", "inverse_kinematics"),
       unchecked=("collision_model",), catalog_id="approach_retreat")
 def approach_retreat(space, *, distance_m=0.05, axis=None, approach=True, retreat=True,
-                     time_parameterization=TimeParameterization.minimum_jerk(peak_speed_fraction=0.3), dwell_s=0.3,
+                     waypoint_generator=WaypointTrajectoryGenerator.minimum_jerk(peak_speed_fraction=0.3), dwell_s=0.3,
                      eef_step_m=0.001, jump_threshold=10.0, max_joint_step_rad=0.1, tolerance_m=1e-4,
                      label="approach and retreat", start=None):
     """The tool in a straight line along one axis, out and back: the short linear legs before and after a point (Pilz LIN
@@ -23,7 +23,7 @@ def approach_retreat(space, *, distance_m=0.05, axis=None, approach=True, retrea
     kinematics, a planar five-bar whose pose has no z axis to speak of, its own x axis, the tool's heading). ``approach``: the
     leg from the start ``distance_m`` along the axis (a negative distance goes the other way), then ``dwell_s``. ``retreat``:
     the leg back. Both: out and back to the start. ``approach=False``: the tool starts on the point and moves ``distance_m``
-    against the axis, out, and stays there (out only). Each leg is one rest-to-rest line under ``time_parameterization``."""
+    against the axis, out, and stays there (out only). Each leg is one rest-to-rest line under ``waypoint_generator``."""
     if not approach and not retreat:
         raise ValueError("approach_retreat needs approach or retreat (or both)")
     if distance_m == 0:
@@ -49,7 +49,7 @@ def approach_retreat(space, *, distance_m=0.05, axis=None, approach=True, retrea
     if retreat:
         legs.append(("retreat", point if approach else point - distance_m * direction))
     for name, goal in legs:
-        piece = tool_line(space, q, with_point(here[:3, :3], goal), time_parameterization, label=f"{label}: {name}", **line_args)
+        piece = tool_line(space, q, with_point(here[:3, :3], goal), waypoint_generator, label=f"{label}: {name}", **line_args)
         pieces.append(piece)
         q = piece.q[-1]
         if dwell_s > 0 and name == legs[0][0] and len(legs) > 1:

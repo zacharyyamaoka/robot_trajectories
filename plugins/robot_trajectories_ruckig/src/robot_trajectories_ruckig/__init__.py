@@ -1,11 +1,11 @@
-"""Ruckig Community as a robot_trajectories time parameterization: ``TimeParameterization("ruckig", ...)`` times one leg as a
+"""Ruckig Community as a robot_trajectories waypoint trajectory generator: ``WaypointTrajectoryGenerator("ruckig", ...)`` times one leg as a
 jerk-limited S-curve.
 
-    law = TimeParameterization("ruckig", peak_speed_fraction=0.8, options={"jerk_fraction": 0.5, "synchronization": "phase"})
-    joint_waypoints(space, waypoints, time_parameterization=law)   # every leg rest-to-rest, an S-curve each
+    law = WaypointTrajectoryGenerator("ruckig", peak_speed_fraction=0.8, options={"jerk_fraction": 0.5, "synchronization": "phase"})
+    joint_waypoints(space, waypoints, waypoint_generator=law)   # every leg rest-to-rest, an S-curve each
     law.leg(q0, q1, space.limits, space.rate_hz, end_state=BoundaryState(velocity, acceleration))   # a leg that ends moving
 
-Registered through the entry point ``robot_trajectories.time_parameterizations``
+Registered through the entry point ``robot_trajectories.waypoint_trajectory_generators``
 (``ruckig = "robot_trajectories_ruckig:RuckigBackend"``); robot_trajectories never imports it (its leaf rule). Zach,
 2026-11-18: "for simple things you keep the implementation yourself but the other things other repos can implement them...
 like ruckig (and if you have the professional version we can support that as a drop-in backend as well)". This is the
@@ -63,7 +63,7 @@ def waypoint_refusal(count: int) -> str:
     """Why Community never times a path of ``count`` > 2 points, naming the drop-in that does."""
     return (f"Ruckig Community times one leg (two path points), not a path of {count}: Community sends intermediate "
             f"waypoints to Ruckig's cloud servers, so they are never handed to it. Install {PRO_PACKAGE} (the local Ruckig Pro "
-            f"build, a drop-in for the time parameterization 'ruckig') instead of this package for waypoints, or time each leg "
+            f"build, a drop-in for the waypoint trajectory generator 'ruckig') instead of this package for waypoints, or time each leg "
             f"on its own (joint_waypoints / legs_through stop at every point)")
 
 
@@ -78,7 +78,7 @@ def _refuse_beside_pro() -> None:
 
 
 class RuckigBackend:
-    """The time parameterization ``ruckig`` on Ruckig Community: one state-to-state leg, never intermediate waypoints."""
+    """The waypoint trajectory generator ``ruckig`` on Ruckig Community: one state-to-state leg, never intermediate waypoints."""
 
     name = NAME
     edition = EDITION
@@ -125,21 +125,21 @@ def settings(limits: JointLimits, law: Any) -> dict[str, Any]:
     options = dict(law.options) if law is not None else {}
     unknown = sorted(set(options) - set(OPTIONS))
     if unknown:
-        raise ValueError(f"time parameterization 'ruckig' has no option {unknown} (it takes {OPTIONS})")
+        raise ValueError(f"waypoint trajectory generator 'ruckig' has no option {unknown} (it takes {OPTIONS})")
     dof = len(limits.joint_names)
     fractions = {}
     for key in ("acceleration_fraction", "jerk_fraction"):
         value = float(options.get(key, 1.0))
         if not 0.0 < value <= 1.0:
-            raise ValueError(f"time parameterization 'ruckig': {key} must lie in (0, 1], got {value}")
+            raise ValueError(f"waypoint trajectory generator 'ruckig': {key} must lie in (0, 1], got {value}")
         fractions[key] = value
     sync = options.get("synchronization", "phase")
     if sync not in SYNCHRONIZATION:
-        raise ValueError(f"time parameterization 'ruckig': synchronization must be one of {tuple(SYNCHRONIZATION)}, got {sync!r}")
+        raise ValueError(f"waypoint trajectory generator 'ruckig': synchronization must be one of {tuple(SYNCHRONIZATION)}, got {sync!r}")
     velocity = _finite_positive(limits.max_velocity, dof)
     acceleration = _finite_positive(limits.max_acceleration, dof)
     if velocity is None or acceleration is None:
-        raise ValueError("time parameterization 'ruckig' needs finite, positive max_velocity and max_acceleration in the "
+        raise ValueError("waypoint trajectory generator 'ruckig' needs finite, positive max_velocity and max_acceleration in the "
                          "JointLimits")
     jerk = _finite_positive(limits.max_jerk, dof)
     if jerk is None and "max_jerk" in options:
@@ -147,7 +147,7 @@ def settings(limits: JointLimits, law: Any) -> dict[str, Any]:
     if jerk is None:
         # WHY refused, never defaulted: a jerk-limited S-curve is defined by its jerk limit, and the drives' value is not ours to guess
         raise ValueError("a jerk-limited S-curve needs a jerk limit: state max_jerk in the JointLimits (the space's jerk_limits "
-                         "rung) or TimeParameterization('ruckig', ..., options={'max_jerk': ...}) in rad/s^3")
+                         "rung) or WaypointTrajectoryGenerator('ruckig', ..., options={'max_jerk': ...}) in rad/s^3")
     return {"max_velocity": velocity, "max_acceleration": acceleration * fractions["acceleration_fraction"],
             "max_jerk": jerk * fractions["jerk_fraction"], "synchronization": SYNCHRONIZATION[sync]}
 

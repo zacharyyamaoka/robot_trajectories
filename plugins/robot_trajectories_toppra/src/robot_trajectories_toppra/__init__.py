@@ -1,12 +1,12 @@
-"""TOPP-RA as a robot_trajectories time parameterization: ``TimeParameterization("toppra", ...)`` finds the fastest timing
+"""TOPP-RA as a robot_trajectories waypoint trajectory generator: ``WaypointTrajectoryGenerator("toppra", ...)`` finds the fastest timing
 along a fixed joint path.
 
-    law = TimeParameterization("toppra", peak_speed_fraction=1.0, options={"acceleration_fraction": 0.8})
+    law = WaypointTrajectoryGenerator("toppra", peak_speed_fraction=1.0, options={"acceleration_fraction": 0.8})
     law.along(path, space.limits, space.rate_hz)          # a dense joint path (M, J), followed point by point
-    cartesian_path(space, [p1, p2], time_parameterization=law)   # the IK path of a tool line, timed time-optimally
+    cartesian_path(space, [p1, p2], waypoint_generator=law)   # the IK path of a tool line, timed time-optimally
     time_optimal_path(space, path)                         # the catalog row's kind
 
-Registered through the entry point ``robot_trajectories.time_parameterizations``
+Registered through the entry point ``robot_trajectories.waypoint_trajectory_generators``
 (``toppra = "robot_trajectories_toppra:ToppraBackend"``); robot_trajectories never imports it (its leaf rule).
 
 What it does (Pham & Pham 2018, TOPP-RA; prior-art note 2026-11-18 §5): the path is fixed and only its timing is chosen.
@@ -78,7 +78,7 @@ logging.getLogger("toppra").setLevel(logging.ERROR)  # WHY: toppra logs every so
 
 
 class ToppraBackend:
-    """The time parameterization ``toppra``: time-optimal along a fixed joint path under velocity and acceleration limits,
+    """The waypoint trajectory generator ``toppra``: time-optimal along a fixed joint path under velocity and acceleration limits,
     rest to rest."""
 
     name = NAME
@@ -96,8 +96,8 @@ class ToppraBackend:
         if path.ndim != 2 or len(path) < 2:
             return f"a path is (M, J) with M >= 2 points, got shape {path.shape}"
         if not (_at_rest(start_state) and _at_rest(end_state)):
-            return ("TOPP-RA here times a path rest to rest; a start or end that moves takes TimeParameterization.minimum_jerk "
-                    "(the quintic through both states) or the 'ruckig' time parameterization")
+            return ("TOPP-RA here times a path rest to rest; a start or end that moves takes WaypointTrajectoryGenerator.minimum_jerk "
+                    "(the quintic through both states) or the 'ruckig' waypoint trajectory generator")
         try:
             settings(limits, law)
         except ValueError as error:
@@ -127,26 +127,26 @@ def settings(limits: JointLimits, law: Any) -> dict[str, Any]:
     options = dict(law.options) if law is not None else {}
     unknown = sorted(set(options) - set(OPTIONS))
     if unknown:
-        raise ValueError(f"time parameterization 'toppra' has no option {unknown} (it takes {OPTIONS})")
+        raise ValueError(f"waypoint trajectory generator 'toppra' has no option {unknown} (it takes {OPTIONS})")
     fraction = float(options.get("acceleration_fraction", 1.0))
     if not 0.0 < fraction <= 1.0:
-        raise ValueError(f"time parameterization 'toppra': acceleration_fraction must lie in (0, 1], got {fraction}")
+        raise ValueError(f"waypoint trajectory generator 'toppra': acceleration_fraction must lie in (0, 1], got {fraction}")
     grid = options.get("grid_points", GRID_POINTS)
     if isinstance(grid, bool) or not isinstance(grid, (int, np.integer)) or grid < 2:
-        raise ValueError(f"time parameterization 'toppra': grid_points must be an int >= 2, got {grid!r}")
+        raise ValueError(f"waypoint trajectory generator 'toppra': grid_points must be an int >= 2, got {grid!r}")
     dof = len(limits.joint_names)
     velocity, acceleration = _finite_positive(limits.max_velocity, dof), _finite_positive(limits.max_acceleration, dof)
     if velocity is None or acceleration is None:
-        raise ValueError("time parameterization 'toppra' needs finite, positive max_velocity and max_acceleration in the "
+        raise ValueError("waypoint trajectory generator 'toppra' needs finite, positive max_velocity and max_acceleration in the "
                          "JointLimits")
     effort_limit = None
     if "effort_fraction" in options:
         effort = options["effort_fraction"]
         if isinstance(effort, bool) or not isinstance(effort, (int, float, np.integer, np.floating)) or not 0.0 < effort <= 1.0:
-            raise ValueError(f"time parameterization 'toppra': effort_fraction must lie in (0, 1], got {effort!r}")
+            raise ValueError(f"waypoint trajectory generator 'toppra': effort_fraction must lie in (0, 1], got {effort!r}")
         max_effort = _finite_positive(limits.max_effort, dof)
         if max_effort is None:
-            raise ValueError("time parameterization 'toppra': effort_fraction needs a finite, positive max_effort in the "
+            raise ValueError("waypoint trajectory generator 'toppra': effort_fraction needs a finite, positive max_effort in the "
                              "JointLimits")
         effort_limit = max_effort * float(effort)
     return {"max_velocity": velocity, "max_acceleration": acceleration * fraction, "grid_points": int(grid),
@@ -226,7 +226,7 @@ def torque_of(dynamics: Any) -> Any:
     """The model's inverse dynamics as ``tau(q, qd, qdd) -> (J,)``: its ``torque`` (or pin_utils' ``inverse_dynamics``)."""
     function = getattr(dynamics, "torque", None) or getattr(dynamics, "inverse_dynamics", None)
     if not callable(function):
-        raise ValueError("time parameterization 'toppra' with effort_fraction needs the space's dynamics, a model with "
+        raise ValueError("waypoint trajectory generator 'toppra' with effort_fraction needs the space's dynamics, a model with "
                          "torque(q, qd, qdd) (the core hands it in as dynamics=space.dynamics)")
 
     def tau(q: Any, qd: Any, qdd: Any) -> np.ndarray:

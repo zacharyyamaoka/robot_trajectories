@@ -1,4 +1,4 @@
-"""The ``ruckig`` time parameterization from Ruckig Community, held to robot_trajectories' TimeParameterizationBackend
+"""The ``ruckig`` waypoint trajectory generator from Ruckig Community, held to robot_trajectories' WaypointTrajectoryGeneratorBackend
 contract on the pendulum, the five-bar and the UR5e, through its real entry point. A plain script (the arm may be powered: never pytest):
 
     /home/bam/robot_trajectories/plugins/robot_trajectories_ruckig/.venv/bin/python /home/bam/robot_trajectories/plugins/robot_trajectories_ruckig/tests/test_ruckig.py
@@ -27,7 +27,7 @@ import robot_trajectories as rt  # noqa: E402
 import scenario  # noqa: E402
 from fixtures import robots  # noqa: E402
 from kind_contract import check_kind  # noqa: E402
-from robot_trajectories import BoundaryState, JointSpace, MissingRung, TimeParameterization  # noqa: E402
+from robot_trajectories import BoundaryState, JointSpace, MissingRung, WaypointTrajectoryGenerator  # noqa: E402
 
 PROVIDER = "robot-trajectories-ruckig"
 PRO = "robot-trajectories-ruckig-pro"
@@ -80,13 +80,13 @@ def test_found_through_its_entry_point_in_a_fresh_interpreter():
         "from importlib import metadata\n"
         "import robot_trajectories as rt\n"
         "from robot_trajectories import plugins\n"
-        "points = [p for p in metadata.entry_points(group='robot_trajectories.time_parameterizations') if p.name == 'ruckig']\n"
+        "points = [p for p in metadata.entry_points(group='robot_trajectories.waypoint_trajectory_generators') if p.name == 'ruckig']\n"
         "assert [p.value for p in points] == ['robot_trajectories_ruckig:RuckigBackend'], points\n"
-        "law = rt.TimeParameterization('ruckig', peak_speed_fraction=1.0)\n"
-        f"assert [e.provider for e in rt.time_parameterizations()['ruckig']] == [{PROVIDER!r}], "
-        "rt.time_parameterizations()['ruckig']\n"
+        "law = rt.WaypointTrajectoryGenerator('ruckig', peak_speed_fraction=1.0)\n"
+        f"assert [e.provider for e in rt.waypoint_trajectory_generators()['ruckig']] == [{PROVIDER!r}], "
+        "rt.waypoint_trajectory_generators()['ruckig']\n"
         "assert plugins.errors() == [], plugins.errors()\n"
-        "serving = rt.time_parameterization.backend('ruckig')\n"
+        "serving = rt.waypoint_trajectory_generator.backend('ruckig')\n"
         "assert type(serving).__module__ == 'robot_trajectories_ruckig' and serving.edition == 'community', serving\n"
         "print('found', type(serving).__name__)\n")
     assert done.returncode == 0 and "found RuckigBackend" in done.stdout, done.stderr[-3000:]
@@ -96,7 +96,7 @@ def test_found_through_its_entry_point_in_a_fresh_interpreter():
 
 
 def test_rest_to_rest_legs_start_and_end_at_the_path_ends_inside_their_limits():
-    law = TimeParameterization("ruckig", peak_speed_fraction=1.0)
+    law = WaypointTrajectoryGenerator("ruckig", peak_speed_fraction=1.0)
     for space in (pendulum(), fivebar(), ur5e()):
         for q0, q1 in legs(space):
             arrays = law.leg(q0, q1, space.limits, space.rate_hz)
@@ -112,21 +112,21 @@ def test_agrees_with_minimum_jerk_on_rest_to_rest_legs():
     # can fail: at a tenth of that jerk, Ruckig's leg must be longer than min-jerk's.
     for space in (pendulum(), fivebar(), ur5e()):
         for q0, q1 in legs(space):
-            reference = TimeParameterization.minimum_jerk(peak_speed_fraction=1.0).leg(q0, q1, space.limits, space.rate_hz)
+            reference = WaypointTrajectoryGenerator.minimum_jerk(peak_speed_fraction=1.0).leg(q0, q1, space.limits, space.rate_hz)
             duration = reference.t[-1]
             distance = np.abs(q1 - q0)
             jerk = np.where(distance > 0, 60.0 * distance / duration**3, np.max(60.0 * distance / duration**3))
             limits = space.limits.replace(max_jerk=jerk)
-            fast = TimeParameterization("ruckig", peak_speed_fraction=1.0).leg(q0, q1, limits, space.rate_hz)
+            fast = WaypointTrajectoryGenerator("ruckig", peak_speed_fraction=1.0).leg(q0, q1, limits, space.rate_hz)
             assert len(fast.t) <= len(reference.t), f"ruckig {fast.t[-1]:.3f} s is longer than minimum-jerk {duration:.3f} s"
             within(fast, limits, space.rate_hz)
-            slow = TimeParameterization("ruckig", peak_speed_fraction=1.0).leg(q0, q1, limits.replace(max_jerk=jerk / 10),
+            slow = WaypointTrajectoryGenerator("ruckig", peak_speed_fraction=1.0).leg(q0, q1, limits.replace(max_jerk=jerk / 10),
                                                                                space.rate_hz)
             assert slow.t[-1] > duration, "a tenth of the jerk did not lengthen the leg: the jerk limit is not reaching Ruckig"
 
 
 def test_a_leg_ends_moving_in_exactly_the_state_it_was_given():
-    law = TimeParameterization("ruckig", peak_speed_fraction=1.0)
+    law = WaypointTrajectoryGenerator("ruckig", peak_speed_fraction=1.0)
     for space, v0, v1, a1 in ((pendulum(), [0.3], [0.8], [-1.0]), (fivebar(), [0.0, 0.2], [0.6, -0.4], [0.0, 0.0])):
         q0, q1 = legs(space)[1]
         start, end = BoundaryState(np.array(v0), np.zeros(space.dof)), BoundaryState(np.array(v1), np.array(a1))
@@ -170,7 +170,7 @@ def test_refuses_intermediate_waypoints_before_ruckig_is_ever_called():
 
     space = fivebar()
     path = np.stack([space.home, space.home + 0.1, space.home + (0.2, 0.0)])
-    law = TimeParameterization("ruckig", peak_speed_fraction=1.0)
+    law = WaypointTrajectoryGenerator("ruckig", peak_speed_fraction=1.0)
     original = plugin.solve_leg
 
     def tripwire(*args, **kwargs):
@@ -179,7 +179,7 @@ def test_refuses_intermediate_waypoints_before_ruckig_is_ever_called():
     plugin.solve_leg = tripwire
     try:
         for call in (lambda: law.along(path, space.limits, space.rate_hz),
-                     lambda: rt.time_parameterization.backend("ruckig").time_parameterize(path, space.limits, space.rate_hz,
+                     lambda: rt.waypoint_trajectory_generator.backend("ruckig").time_parameterize(path, space.limits, space.rate_hz,
                                                                                           law)):
             try:
                 call()
@@ -187,13 +187,13 @@ def test_refuses_intermediate_waypoints_before_ruckig_is_ever_called():
                 assert PRO in str(error) and "cloud" in str(error), error
             else:
                 raise AssertionError("a three-point path was timed by Ruckig Community")
-        refusal = rt.time_parameterization.backend("ruckig").can_service(path, space.limits, law, None, None)
+        refusal = rt.waypoint_trajectory_generator.backend("ruckig").can_service(path, space.limits, law, None, None)
         assert PRO in refusal and "cloud" in refusal, refusal
-        # A Cartesian line hands the time parameterization its dense IK path: refused the same way, never sent.
+        # A Cartesian line hands the waypoint trajectory generator its dense IK path: refused the same way, never sent.
         kinematic = JointSpace.from_limits(space.limits, home=space.home).with_kinematics(robots.FiveBarKinematics())
         tool = kinematic.forward(FIVEBAR_START)[:3, 3]
         try:
-            rt.cartesian_path(kinematic, [tool + (0.03, 0.0, 0.0)], time_parameterization=law, start=FIVEBAR_START)
+            rt.cartesian_path(kinematic, [tool + (0.03, 0.0, 0.0)], waypoint_generator=law, start=FIVEBAR_START)
         except ValueError as error:
             assert PRO in str(error), error
         else:
@@ -204,7 +204,7 @@ def test_refuses_intermediate_waypoints_before_ruckig_is_ever_called():
 
 def test_refuses_without_a_jerk_limit_and_names_how_to_add_one():
     bare = JointSpace.from_limits(robots.PENDULUM_LIMITS)
-    law = TimeParameterization("ruckig", peak_speed_fraction=1.0)
+    law = WaypointTrajectoryGenerator("ruckig", peak_speed_fraction=1.0)
     try:
         law.leg(np.zeros(1), np.full(1, 0.2), bare.limits, bare.rate_hz)
     except ValueError as error:
@@ -217,10 +217,10 @@ def test_refuses_without_a_jerk_limit_and_names_how_to_add_one():
         assert "jerk" in str(error), error
     else:
         raise AssertionError("the kind ran on a space without a jerk limit")
-    stated = TimeParameterization("ruckig", peak_speed_fraction=1.0, options={"max_jerk": 200.0})
+    stated = WaypointTrajectoryGenerator("ruckig", peak_speed_fraction=1.0, options={"max_jerk": 200.0})
     within(stated.leg(np.zeros(1), np.full(1, 0.2), bare.limits, bare.rate_hz), bare.limits.replace(max_jerk=np.array([200.0])), 500.0)
     try:
-        TimeParameterization("ruckig", peak_speed_fraction=1.0, options={"jerk_fractoin": 0.5}).leg(np.zeros(1), np.full(1, 0.2),
+        WaypointTrajectoryGenerator("ruckig", peak_speed_fraction=1.0, options={"jerk_fractoin": 0.5}).leg(np.zeros(1), np.full(1, 0.2),
                                                                                                     pendulum().limits, 500.0)
     except ValueError as error:
         assert "jerk_fractoin" in str(error), error
@@ -232,7 +232,7 @@ def test_checks_the_position_limits_community_ignores():
     space = pendulum()
     # From rest at 0.25 rad, arrive at 0.30 rad moving back at 1.5 rad/s: it must swing past 0.30 first, beyond the 0.33 limit.
     try:
-        TimeParameterization("ruckig", peak_speed_fraction=1.0).leg(np.full(1, 0.25), np.full(1, 0.30), space.limits,
+        WaypointTrajectoryGenerator("ruckig", peak_speed_fraction=1.0).leg(np.full(1, 0.25), np.full(1, 0.30), space.limits,
                                                                     space.rate_hz,
                                                                     end_state=BoundaryState(np.full(1, -1.5), np.zeros(1)))
     except ValueError as error:
@@ -248,7 +248,7 @@ def test_refuses_to_load_beside_the_ruckig_pro_distribution():
         (info / "METADATA").write_text("Metadata-Version: 2.1\nName: ruckig-pro\nVersion: 0.19.4\n")
         done = fresh("import warnings\nwarnings.simplefilter('ignore')\n"
                      "import robot_trajectories as rt\nfrom robot_trajectories import plugins\nplugins.load()\n"
-                     "assert 'ruckig' not in rt.time_parameterizations(), rt.time_parameterizations()\n"
+                     "assert 'ruckig' not in rt.waypoint_trajectory_generators(), rt.waypoint_trajectory_generators()\n"
                      "assert any('exactly one' in e and 'ruckig-pro' in e for e in plugins.errors()), plugins.errors()\n"
                      "print('refused')\n", site)
     assert done.returncode == 0 and "refused" in done.stdout, done.stderr[-3000:]

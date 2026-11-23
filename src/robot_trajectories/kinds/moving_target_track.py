@@ -5,14 +5,14 @@ import numpy as np
 from ..registry import LIMITS, kind
 from ..segments import Motion
 from ..space import State
-from ..time_parameterization import TimeParameterization
+from ..waypoint_trajectory_generator import WaypointTrajectoryGenerator
 from . import _lane_f as f
 
 
 @kind(use_cases=("tracking_eval", "conveyor_pick_and_place", "cycle_time"), needs=(*LIMITS, "forward_kinematics", "inverse_kinematics"),
       unchecked=("collision_model",), catalog_id="moving_target_track")
 def moving_target_track(space, target=None, *, sync_start_s=1.0, sync_end_s=2.0, pose_in_target=None, orientation="hold",
-                        time_parameterization=TimeParameterization.minimum_jerk(peak_speed_fraction=0.5), tolerance_m=1e-4,
+                        waypoint_generator=WaypointTrajectoryGenerator.minimum_jerk(peak_speed_fraction=0.5), tolerance_m=1e-4,
                         label="track a moving point", start=None):
     """From rest, meet a point that moves at ``sync_start_s`` with its velocity matched, keep the tool on it to ``sync_end_s``,
     then coast to rest. Times are on this trajectory's clock (t = 0 its first sample), as the target's are.
@@ -24,7 +24,7 @@ def moving_target_track(space, target=None, *, sync_start_s=1.0, sync_end_s=2.0,
       ``sync`` = [t0, t1]: the trajectory is a prediction under it (PEP 0002 §7).
     - ``pose_in_target``: where the tool sits in the target's frame (an xyz offset or a 4x4); None is on the target.
     - ``orientation``: "hold" keeps the tool's start orientation; "follow" takes the target's (composed with the offset).
-    - ``time_parameterization``: the approach, a joint-space leg ending in the tracking state (the quintic through both states); it waits at
+    - ``waypoint_generator``: the approach, a joint-space leg ending in the tracking state (the quintic through both states); it waits at
       rest first when it would arrive early.
 
     Refusals are ``CannotCatch``: ``target_leaves_window`` (the sync window is not inside the target's), ``target_outruns_arm``
@@ -45,7 +45,7 @@ def moving_target_track(space, target=None, *, sync_start_s=1.0, sync_end_s=2.0,
     at_t0 = np.asarray(moving.target(t0), float)
     rotation = space.forward(start)[:3, :3] if orientation == "hold" else at_t0[:3, :3] @ offset[:3, :3]
     pieces, approach_notes, path = f.meet(space, start, moving, first, last, rotation=rotation, offset=at_t0[:3, :3] @ offset[:3, 3],
-                                          time_parameterization=time_parameterization, label=label, tolerance_m=tolerance_m)
+                                          waypoint_generator=waypoint_generator, label=label, tolerance_m=tolerance_m)
     track = pieces[-1]
     end = State(track.q[-1], track.qd[-1], track.qdd[-1])
     velocity = path.velocities[-1]
@@ -55,6 +55,6 @@ def moving_target_track(space, target=None, *, sync_start_s=1.0, sync_end_s=2.0,
         def make(steps: int, stride: int):
             return f.coast(point, velocity, steps, rate, rotation, begin_s=t1, stride=stride)
 
-        steps = max(int(np.ceil(time_parameterization.min_move_s * rate)), f.braking_steps(space, end.qd))
+        steps = max(int(np.ceil(waypoint_generator.min_move_s * rate)), f.braking_steps(space, end.qd))
         pieces.append(f.fitted(space, make, steps, end.q, label=f"{label}: coast to rest", first=end, tolerance_m=tolerance_m))
     return Motion(pieces, [*notes, *approach_notes], {"assumes": moving.assumes, "sync": [t0, t1]})

@@ -1,4 +1,6 @@
-"""The trajectory catalog: every trajectory family worth supporting in the planned JointTrajectoryGenerator, one record each.
+"""The trajectory catalog: every trajectory family worth supporting, one record each. Every kind is a TrajectoryGenerator (it
+outputs a robot_msgs Trajectory: ``robot_trajectories.TrajectoryGenerator``), and this catalog lists them, those that generate
+today and those not built yet.
 
 Zach (Daily Note, 2026-11-18): "I want like a library or Catalog of all the different trajectories". Swept 2026-11-18 from three
 sources: our code (bam_ws, sim2real, robot_controllers, robot_msgs; every ``exists_in`` is ``path:line``), the vault (his notes from

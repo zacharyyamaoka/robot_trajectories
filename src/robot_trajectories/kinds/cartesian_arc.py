@@ -6,14 +6,14 @@ from .. import kernels as k
 from ..cartesian import follow, poses_for, tool_target_hold
 from ..registry import LIMITS, kind
 from ..segments import Motion, Piece
-from ..time_parameterization import TimeParameterization
+from ..waypoint_trajectory_generator import WaypointTrajectoryGenerator
 from ._lane_c import arc_geometry, arc_path, as_point
 
 
 @kind(use_cases=("tracking_eval", "accuracy", "demo"), needs=(*LIMITS, "forward_kinematics", "inverse_kinematics"),
       unchecked=("collision_model",), catalog_id="cartesian_arc")
 def cartesian_arc(space, goal=None, *, interim=None, centre=None, long_way=False,
-                  time_parameterization=TimeParameterization.minimum_jerk(peak_speed_fraction=0.5), orientation="hold",
+                  waypoint_generator=WaypointTrajectoryGenerator.minimum_jerk(peak_speed_fraction=0.5), orientation="hold",
                   dwell_s=0.0, eef_step_m=0.001, jump_threshold=10.0, max_joint_step_rad=0.1, tolerance_m=1e-4,
                   tolerance_rad=1e-3, label="cartesian arc", start=None):
     """The tool along a circular arc from where it is to ``goal`` (default: a 4 cm arc in the xy plane) (an xyz point in metres, or a 4x4 pose, in the kinematics' base
@@ -22,7 +22,7 @@ def cartesian_arc(space, goal=None, *, interim=None, centre=None, long_way=False
     The arc is named one of two ways. ``interim``: a point (xyz or pose) the arc passes through, between the start and the goal,
     so the circle is the one through the three points (it may be longer than a half circle). ``centre``: the centre of the circle,
     the arc taking the short way round (``long_way=True`` the other); the start and goal must lie on it. The arc is the geometry
-    (a path ``s -> pose`` given to ``cartesian.follow``); the ``time_parameterization`` times it along its length.
+    (a path ``s -> pose`` given to ``cartesian.follow``); the ``waypoint_generator`` times it along its length.
 
     ``orientation``: "hold" keeps the tool's start orientation, "follow" slerps to the goal pose's own (a position-only kinematics,
     a planar five-bar, ignores orientation). The commanded tool point is in the ``tool_target`` channel at every sample.
@@ -41,7 +41,7 @@ def cartesian_arc(space, goal=None, *, interim=None, centre=None, long_way=False
     circle_centre, normal, radius, sweep = arc_geometry(here[:3, 3], target[:3, 3], interim=middle, centre=spoke, long_way=long_way)
     path = arc_path(here, target, circle_centre, normal, radius, sweep, orientation)
     length = radius * abs(sweep)
-    piece = follow(space, start, path, time_parameterization, length_m=length, label=f"{label}: arc", eef_step_m=eef_step_m,
+    piece = follow(space, start, path, waypoint_generator, length_m=length, label=f"{label}: arc", eef_step_m=eef_step_m,
                    jump_threshold=jump_threshold, max_joint_step_rad=max_joint_step_rad, tolerance_m=tolerance_m,
                    tolerance_rad=tolerance_rad)
     pieces: list[k.Arrays] = [piece]

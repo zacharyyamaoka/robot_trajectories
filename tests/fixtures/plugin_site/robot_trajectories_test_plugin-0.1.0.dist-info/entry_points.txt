@@ -1,5 +1,5 @@
 [robot_trajectories.kinds]
 test_plugin = robot_trajectories_test_plugin.kinds
 
-[robot_trajectories.time_parameterizations]
-smoothstep_test = robot_trajectories_test_plugin.time_parameterization:SmoothStep
+[robot_trajectories.waypoint_trajectory_generators]
+smoothstep_test = robot_trajectories_test_plugin.waypoint_trajectory_generator:SmoothStep

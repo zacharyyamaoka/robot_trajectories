@@ -20,8 +20,8 @@ body is only its motion:
    it) or ``ends="anywhere"`` (event-ended), and free of collision when the space has a collision model.
 5. **Records the call** in ``header.meta["recipe"]``: the name, every argument with defaults written out (a moving target by
    its data form: a ``LinearMotion`` or a ``PoseTrajectory``, never a callable), the space's fingerprint. A higher-order kind's recipe is its own one call; its segments keep the calls that make each alone.
-   A renamed parameter keeps its old key there (``time_parameterization`` is written ``"time_law"``: ``RECORDED_AS``), and
-   its old keyword is still accepted.
+   A renamed parameter keeps its oldest key there (``waypoint_generator``, formerly ``time_parameterization``, is written
+   ``"time_law"``: ``RECORDED_AS``), and every older keyword is still accepted.
 
 Kinds are found by importing ``kinds/*.py`` (one file per kind) and every module an installed package names in the
 entry-point group ``robot_trajectories.kinds`` (``plugins.py``). Both register the same way, and are listed the same way.
@@ -48,7 +48,7 @@ from . import kernels as k
 from .moving import LinearMotion, has_data_form, is_target_record, target_from_record, target_record
 from .segments import RECIPE_FORMAT, TRANSITION_SPEED, Motion, Piece, _Block, assemble, guard, segment_info, with_segments
 from .space import JointSpace, MissingRung, State, Status
-from .time_parameterization import RENAMED_KEYWORDS, TimeParameterization, renamed_keywords
+from .waypoint_trajectory_generator import KEYWORD_NAMES, WaypointTrajectoryGenerator, renamed_keywords
 from .trajectory_catalog.kind import (DIMENSIONS, ENTRY_LEVEL_OF_NEED, ENTRY_LEVELS, FAMILIES, NEEDS, STARTS_AS,
                                       USE_CASE_TAGS)
 
@@ -56,10 +56,11 @@ LIMITS = ("joint_limits", "velocity_limits", "acceleration_limits")
 STARTS = ("at_rest", "moving")
 ENDS = ("at_rest", "moving", "anywhere")
 COMMANDS = ("position", "effort")
-# WHY a renamed parameter keeps its old key in the recipe (the rename of 2026-11-23, time_law -> time_parameterization): the
-# recipe is a file format. arm_motion_bench's frozen datasets hold recipes written with "time_law" / "approach_time_law"; a
-# recipe written now reads the same, so those still rebuild, compare equal, and an older robot_trajectories rebuilds new ones
-RECORDED_AS = {new: old for old, new in RENAMED_KEYWORDS.items()}
+# WHY a renamed parameter keeps its OLDEST key in the recipe (the renames of 2026-11-23, time_law -> time_parameterization ->
+# waypoint_generator): the recipe is a file format. arm_motion_bench's frozen datasets hold recipes written with "time_law" /
+# "approach_time_law"; a recipe written now reads the same, so those still rebuild, compare equal, and an older
+# robot_trajectories rebuilds new ones. Every later name maps to the first, whichever one a kind declares
+RECORDED_AS = {name: names[0] for names in KEYWORD_NAMES for name in names[1:]}
 
 
 @dataclass(frozen=True)
@@ -193,9 +194,11 @@ def kind(*, use_cases: Sequence[str], needs: Sequence[str] = LIMITS, better_with
             for other in _REGISTRY.values():
                 if other.catalog_id == catalog_id and other.name != name:
                     raise TypeError(f"{name} and {other.name} both claim catalog row {catalog_id!r}")
-        both = [old for old, new in RENAMED_KEYWORDS.items() if old in signature.parameters and new in signature.parameters]
+        taken = [[spelling for spelling in names if spelling in signature.parameters] for names in KEYWORD_NAMES]
+        both = [spellings for spellings in taken if len(spellings) > 1]
         if both:
-            raise TypeError(f"kind {name}: takes {both} beside their new names; a recipe records both under one key")
+            raise TypeError(f"kind {name}: takes {' and '.join(f'{spelling}=' for spelling in both[0])}, names of one "
+                            "parameter; a recipe records them under one key")
         has_label = "label" in signature.parameters
 
         @functools.wraps(body)
@@ -223,8 +226,10 @@ def kind(*, use_cases: Sequence[str], needs: Sequence[str] = LIMITS, better_with
                 return _composed(info, space, result, call, here, notes)
             return _primitive(info, space, result, call, here, label, notes)
 
-        renamed = {old: new for old, new in RENAMED_KEYWORDS.items() if new in signature.parameters}
-        if renamed:  # the old keyword still works, from a caller or from a recipe's call (rebuild hands it the recorded key)
+        # every other name of a parameter the kind declares (older or newer: a plugin kind may be written to an older name)
+        renamed = {other: declared[0] for names, declared in zip(KEYWORD_NAMES, taken) if declared
+                   for other in names if other != declared[0]}
+        if renamed:  # an older keyword still works, from a caller or from a recipe's call (rebuild hands it the recorded key)
             generate = renamed_keywords(**renamed)(generate)
         generate.kind = name  # type: ignore[attr-defined]
         _REGISTRY[name] = KindInfo(name, generate, tuple(use_cases), tuple(needs), better_with, tuple(unchecked), catalog_id,
@@ -300,7 +305,7 @@ def _composed(info: KindInfo, space: JointSpace, result: JointTrajectory, call: 
 
 
 def _normalize(kind_name: str, key: str, value: Any) -> Any:
-    """A parameter as a kind's body reads it: tuples for sequences, Python numbers, a TimeParameterization for its dict."""
+    """A parameter as a kind's body reads it: tuples for sequences, Python numbers, a WaypointTrajectoryGenerator for its dict."""
     if key == "start":
         if value is None or isinstance(value, (JointTrajectory, Mapping)) or type(value).__name__ == "State":
             return value
@@ -315,7 +320,7 @@ def _normalize(kind_name: str, key: str, value: Any) -> Any:
 
 def _decode(value: Any) -> Any:
     if isinstance(value, Mapping) and "time_law" in value:
-        return TimeParameterization.from_config(value)
+        return WaypointTrajectoryGenerator.from_config(value)
     if is_target_record(value):
         return target_from_record(value)  # WHY the object, not the mapping: the body is handed what the first call was handed
     if isinstance(value, (list, tuple, np.ndarray)):
@@ -335,7 +340,7 @@ def _encode(key: str, value: Any) -> Any:
         return [float(item) for item in value.positions[-1]]
     if isinstance(value, State):
         return value.to_config()
-    if isinstance(value, TimeParameterization):
+    if isinstance(value, WaypointTrajectoryGenerator):
         return value.to_config()
     if has_data_form(value):
         return target_record(value)  # a LinearMotion or a PoseTrajectory, tagged "moving_target" (moving.py)
@@ -352,7 +357,7 @@ def _encode(key: str, value: Any) -> Any:
         raise TypeError(f"parameter {key}={value!r} cannot be written as text: a function of time has no data form. A moving "
                         "target is recorded as a LinearMotion (constant velocity; LinearMotion.from_sync(pose, sync_dir, "
                         "sync_speed)) or a robot_msgs PoseTrajectory (sampled poses): pass one of those")
-    raise TypeError(f"parameter {key}={value!r} cannot be written as text: pass numbers, names, lists, a TimeParameterization, "
+    raise TypeError(f"parameter {key}={value!r} cannot be written as text: pass numbers, names, lists, a WaypointTrajectoryGenerator, "
                     "or a LinearMotion or PoseTrajectory as a moving target")
 
 

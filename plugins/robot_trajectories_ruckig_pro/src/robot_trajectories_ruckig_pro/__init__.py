@@ -1,18 +1,18 @@
-"""Ruckig Pro, the local build, as a drop-in for the robot_trajectories time parameterization ``ruckig``: waypoints and position
+"""Ruckig Pro, the local build, as a drop-in for the robot_trajectories waypoint trajectory generator ``ruckig``: waypoints and position
 limits.
 
-    law = TimeParameterization("ruckig", peak_speed_fraction=1.0)
+    law = WaypointTrajectoryGenerator("ruckig", peak_speed_fraction=1.0)
     law.along(path, space.limits, space.rate_hz)            # a path of M points, passed through in order (Pro's waypoints)
     law.leg(q0, q1, space.limits, space.rate_hz, end_state=...)   # one leg, as Community does, with position limits enforced
-    cartesian_path(space, [p1, p2], time_parameterization=law)   # the IK path of a tool line, every IK point a waypoint
+    cartesian_path(space, [p1, p2], waypoint_generator=law)   # the IK path of a tool line, every IK point a waypoint
 
-Registered through ``robot_trajectories.time_parameterizations`` under the same name as Community
+Registered through ``robot_trajectories.waypoint_trajectory_generators`` under the same name as Community
 (``ruckig = "robot_trajectories_ruckig_pro:RuckigProBackend"``). Zach, 2026-11-18: "...like ruckig (and if you have the
 professional version we can support that as a drop-in backend as well)".
 
 **Install exactly one of** ``robot-trajectories-ruckig`` (Community) **or** this package. Both register ``ruckig``, and the
 ``ruckig`` / ``ruckig-pro`` distributions own the same ``ruckig`` module, so which binary ran would depend on install order:
-robot_trajectories refuses two providers of one time parameterization, and this backend refuses to load beside the ``ruckig``
+robot_trajectories refuses two providers of one waypoint trajectory generator, and this backend refuses to load beside the ``ruckig``
 distribution.
 
 **Provenance, verified at load** (a copy of bam_ws ``bam_traj_gen/ruckig_backend.py`` ``require_local_ruckig_pro``, fail
@@ -21,7 +21,7 @@ closed): the ``ruckig-pro`` distribution at 0.19.4; the Community ``ruckig`` dis
 (or ``$ROBOT_TRAJECTORIES_RUCKIG_PRO_CHECKOUT``, which must carry the same folder name); the loaded module's
 ``__version__`` matches; the Pro-only ``WaypointsCalculator`` is present; the native module belongs to the distribution; and it
 carries no cloud-client markers. Any failure raises at load, so the plugin is reported (``robot_trajectories.plugins.errors()``)
-and the time parameterization ``ruckig`` is not registered. It never falls back to Community or to the cloud.
+and the waypoint trajectory generator ``ruckig`` is not registered. It never falls back to Community or to the cloud.
 
 What it serves:
 - a **path of M >= 2 points**: M = 2 is one leg (from any start state to any end state, its duration on the sample grid by
@@ -152,7 +152,7 @@ def require_local_ruckig_pro() -> RuckigProInfo:
 
 
 class RuckigProBackend:
-    """The time parameterization ``ruckig`` on the verified local Ruckig Pro build: legs and waypoint paths, position limits
+    """The waypoint trajectory generator ``ruckig`` on the verified local Ruckig Pro build: legs and waypoint paths, position limits
     enforced."""
 
     name = NAME
@@ -191,30 +191,30 @@ def settings(limits: JointLimits, law: Any) -> dict[str, Any]:
     options = dict(law.options) if law is not None else {}
     unknown = sorted(set(options) - set(OPTIONS))
     if unknown:
-        raise ValueError(f"time parameterization 'ruckig' has no option {unknown} (it takes {OPTIONS})")
+        raise ValueError(f"waypoint trajectory generator 'ruckig' has no option {unknown} (it takes {OPTIONS})")
     dof = len(limits.joint_names)
     fractions = {}
     for key in ("acceleration_fraction", "jerk_fraction"):
         value = float(options.get(key, 1.0))
         if not 0.0 < value <= 1.0:
-            raise ValueError(f"time parameterization 'ruckig': {key} must lie in (0, 1], got {value}")
+            raise ValueError(f"waypoint trajectory generator 'ruckig': {key} must lie in (0, 1], got {value}")
         fractions[key] = value
     sync_names = {"phase": ruckig.Synchronization.Phase, "time": ruckig.Synchronization.Time,
                   "time_if_necessary": ruckig.Synchronization.TimeIfNecessary, "none": ruckig.Synchronization.No}
     sync = options.get("synchronization", "phase")
     if sync not in sync_names:
-        raise ValueError(f"time parameterization 'ruckig': synchronization must be one of {tuple(sync_names)}, got {sync!r}")
+        raise ValueError(f"waypoint trajectory generator 'ruckig': synchronization must be one of {tuple(sync_names)}, got {sync!r}")
     velocity = _finite_positive(limits.max_velocity, dof)
     acceleration = _finite_positive(limits.max_acceleration, dof)
     if velocity is None or acceleration is None:
-        raise ValueError("time parameterization 'ruckig' needs finite, positive max_velocity and max_acceleration in the "
+        raise ValueError("waypoint trajectory generator 'ruckig' needs finite, positive max_velocity and max_acceleration in the "
                          "JointLimits")
     jerk = _finite_positive(limits.max_jerk, dof)
     if jerk is None and "max_jerk" in options:
         jerk = _finite_positive(np.broadcast_to(np.asarray(options["max_jerk"], float), (dof,)), dof)
     if jerk is None:
         raise ValueError("a jerk-limited S-curve needs a jerk limit: state max_jerk in the JointLimits (the space's jerk_limits "
-                         "rung) or TimeParameterization('ruckig', ..., options={'max_jerk': ...}) in rad/s^3")
+                         "rung) or WaypointTrajectoryGenerator('ruckig', ..., options={'max_jerk': ...}) in rad/s^3")
     low = None if limits.min_position is None else np.asarray(limits.min_position, float)
     high = None if limits.max_position is None else np.asarray(limits.max_position, float)
     return {"max_velocity": velocity, "max_acceleration": acceleration * fractions["acceleration_fraction"],

@@ -5,17 +5,17 @@ build-backend = "hatchling.build"
 [project]
 name = "robot-trajectories-ruckig-pro"
 version = "0.1.0"
-description = "Ruckig Pro (the local build) as a drop-in for the robot_trajectories time parameterization 'ruckig': local intermediate waypoints and position limits."
+description = "Ruckig Pro (the local build) as a drop-in for the robot_trajectories waypoint trajectory generator 'ruckig': local intermediate waypoints and position limits."
 authors = [{ name = "Zach Yamaoka" }]
 requires-python = ">=3.11"
 # WHY ruckig-pro from the workspace checkout, pinned (bam_traj_gen's pyproject, the same pin): the licensed Pro source is
 # built here, locally, so intermediate waypoints are solved on this machine and never by Ruckig's cloud API.
-# WHY never installed beside robot-trajectories-ruckig: both register the time parameterization 'ruckig', and ruckig /
+# WHY never installed beside robot-trajectories-ruckig: both register the waypoint trajectory generator 'ruckig', and ruckig /
 # ruckig-pro own the same 'ruckig' module, so install order would pick the binary. Install exactly one of the two. The backend
-# refuses to load beside the 'ruckig' distribution, and robot_trajectories refuses two providers of one time parameterization.
+# refuses to load beside the 'ruckig' distribution, and robot_trajectories refuses two providers of one waypoint trajectory generator.
 dependencies = ["robot-trajectories>=0.1.0", "ruckig-pro==0.19.4", "numpy>=1.26"]
 
-[project.entry-points."robot_trajectories.time_parameterizations"]
+[project.entry-points."robot_trajectories.waypoint_trajectory_generators"]
 ruckig = "robot_trajectories_ruckig_pro:RuckigProBackend"
 
 [tool.uv.sources]

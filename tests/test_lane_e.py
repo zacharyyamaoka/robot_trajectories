@@ -1,5 +1,5 @@
-"""Lane E's two kinds in the core environment, where no time-parameterization plugin is installed: registered on their catalog
-rows, callable as f(space) alone, and locked (a ``MissingRung`` naming the package to install), never broken, even on a space
+"""Lane E's two kinds in the core environment, where no waypoint-trajectory-generator plugin is installed: registered on their
+catalog rows, callable as f(space) alone, and locked (a ``MissingRung`` naming the package to install), never broken, even on a space
 with every rung.
 
     /home/bam/robot_trajectories/.venv/bin/python /home/bam/robot_trajectories/tests/test_lane_e.py
@@ -17,7 +17,7 @@ import _runner
 import scenario
 from fixtures import robots
 from robot_trajectories import (JointSpace, MissingRung, catalog, jerk_limited_scurve, kinds, time_optimal_path,
-                                time_parameterization)
+                                waypoint_trajectory_generator)
 
 
 def test_registered_on_their_catalog_rows():
@@ -29,7 +29,7 @@ def test_registered_on_their_catalog_rows():
 
 
 def test_locked_without_a_plugin_naming_the_package_even_with_every_rung():
-    assert not {"ruckig", "toppra"} & set(time_parameterization.time_parameterizations()), \
+    assert not {"ruckig", "toppra"} & set(waypoint_trajectory_generator.waypoint_trajectory_generators()), \
         "a plugin is installed in the core venv: this test needs none"
     for space in (JointSpace.from_limits(robots.PENDULUM_LIMITS.replace(max_jerk=np.array([200.0]))),
                   JointSpace.from_limits(scenario.ur5e_space().limits.replace(max_jerk=np.full(6, 100.0)))):
@@ -39,7 +39,7 @@ def test_locked_without_a_plugin_naming_the_package_even_with_every_rung():
             try:
                 call()
             except MissingRung as error:
-                assert (package in str(error) and "robot_trajectories.time_parameterizations" in str(error)
+                assert (package in str(error) and "robot_trajectories.waypoint_trajectory_generators" in str(error)
                         and "Add it" in str(error)), error
             else:
                 raise AssertionError(f"ran without {package}")

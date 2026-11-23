@@ -1,7 +1,7 @@
-"""The old module name, kept so ``from robot_trajectories.time_law import TimeLaw`` still works: ``time_parameterization.py``
-is the module now (formerly TimeLaw, renamed 2026-11-23).
+"""The old module name, kept so ``from robot_trajectories.time_law import TimeLaw`` still works:
+``waypoint_trajectory_generator.py`` is the module now (formerly TimeLaw, then TimeParameterization; both renamed 2026-11-23).
 
-Every name this module had imports from here as the same object as the new module's (``TimeLaw is TimeParameterization``);
+Every name this module had imports from here as the same object as the new module's (``TimeLaw is WaypointTrajectoryGenerator``);
 anything not listed below (``BuiltInBackend``, ``PLUGIN_SHAPES``, ...) is looked up on the new module. Nothing here warns.
 """
 
@@ -9,20 +9,22 @@ from __future__ import annotations
 
 from typing import Any
 
-from . import time_parameterization as _module
-from .time_parameterization import (BUILT_IN, TIME_PARAMETERIZATION_GROUP, BackendInfo, BoundaryState, LegTiming, Timed,
-                                    TimeParameterization, TimeParameterizationBackend, backend, backend_needs, legs_through,
-                                    register_time_parameterization, time_parameterizations)
+from . import waypoint_trajectory_generator as _module
+from .waypoint_trajectory_generator import (BUILT_IN, WAYPOINT_TRAJECTORY_GENERATOR_GROUP, BackendInfo, BoundaryState, LegTiming,
+                                            Timed, WaypointTrajectoryGenerator, WaypointTrajectoryGeneratorBackend, backend,
+                                            backend_needs, legs_through, register_waypoint_trajectory_generator,
+                                            waypoint_trajectory_generators)
 
-# WHY these deprecated aliases (Zach, 2026-11-23): "time law" was an agent's coinage he never used; the stage is trajectory
-# generation and the class role a time parameterization, MoveIt's name for it (a path and limits in, a timed trajectory out).
-# The old names stay importable, as the same objects and silently, because arm_motion_bench and 21 of its frozen dataset files
-# use them. TIME_LAW_GROUP names the group a plugin declares now; the old group is still read (plugins.LEGACY_TIME_LAW_GROUP).
-TimeLaw = TimeParameterization
-TimeLawBackend = TimeParameterizationBackend
-register_time_law = register_time_parameterization
-time_laws = time_parameterizations
-TIME_LAW_GROUP = TIME_PARAMETERIZATION_GROUP
+# WHY these deprecated aliases (Zach, 2026-11-23): "time law" was an agent's coinage he never used; it became a time
+# parameterization (MoveIt's name for the role), then a waypoint trajectory generator: "these ones are specially
+# WaypointTrajectoryGenerators. All TrajectoryGenerators output Trajectories". The old names stay importable, as the same
+# objects and silently, because arm_motion_bench and 21 of its frozen dataset files use them. TIME_LAW_GROUP names the group a
+# plugin declares now; the old group is still read (plugins.LEGACY_TIME_LAW_GROUP).
+TimeLaw = WaypointTrajectoryGenerator
+TimeLawBackend = WaypointTrajectoryGeneratorBackend
+register_time_law = register_waypoint_trajectory_generator
+time_laws = waypoint_trajectory_generators
+TIME_LAW_GROUP = WAYPOINT_TRAJECTORY_GENERATOR_GROUP
 
 
 def __getattr__(name: str) -> Any:

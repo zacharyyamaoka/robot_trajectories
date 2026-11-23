@@ -5,7 +5,7 @@ import numpy as np
 from .. import kernels as k
 from ..registry import LIMITS, kind
 from ..segments import Motion
-from ..time_parameterization import TimeParameterization
+from ..waypoint_trajectory_generator import WaypointTrajectoryGenerator
 from ._lane_c import SEQUENCES, unit_points
 
 DRAW_FACTOR = 8  # WHY: with a collision checker, up to this many times the count are drawn, to replace the stations that collide
@@ -14,7 +14,7 @@ DRAW_FACTOR = 8  # WHY: with a collision checker, up to this many times the coun
 @kind(use_cases=("workspace_coverage", "kinematic_calibration", "gravity_id", "homing"), needs=LIMITS, unchecked=("collision_model",),
       catalog_id="space_filling_pose_set")
 def space_filling_pose_set(space, count=64, *, method="sobol", seed=0, order="nearest", margin_fraction=0.05,
-                           time_parameterization=TimeParameterization.minimum_jerk(peak_speed_fraction=0.5), dwell_s=0.5,
+                           waypoint_generator=WaypointTrajectoryGenerator.minimum_jerk(peak_speed_fraction=0.5), dwell_s=0.5,
                            label="space-filling pose set", start=None):
     """``count`` stations spread evenly over the space's room (the limit box, or with a reach map the hole-free box around the
     start), visited one after another with a dwell at each: a pose set. The stations are a Sobol or Halton sequence or a Latin
@@ -22,7 +22,7 @@ def space_filling_pose_set(space, count=64, *, method="sobol", seed=0, order="ne
     digital shift for Sobol, a random shift for Halton, the strata pairing for the hypercube). Sobol wants ``count`` a power of two.
 
     The stations are inside the room shrunk by ``margin_fraction`` of each joint's span. ``order``: "nearest" visits them by
-    greedy nearest neighbour from the start (short legs), "sequence" in the order drawn. The legs are ``time_parameterization``'s rest-to-rest
+    greedy nearest neighbour from the start (short legs), "sequence" in the order drawn. The legs are ``waypoint_generator``'s rest-to-rest
     legs; each station's dwell is labelled "<label>: station k" and the stations' configurations are in the segment entry
     (``entry["stations"]``, rad).
 
@@ -53,7 +53,7 @@ def space_filling_pose_set(space, count=64, *, method="sobol", seed=0, order="ne
     here = start
     left_out = 0
     for q in configs:
-        leg = time_parameterization.leg(here, q, space.limits, space.rate_hz, label=f"{label}: leg {len(stations) + 1}",
+        leg = waypoint_generator.leg(here, q, space.limits, space.rate_hz, label=f"{label}: leg {len(stations) + 1}",
                                         dynamics=space.dynamics)
         if space.checks_collision and any(space.in_collision(row) for row in leg.q[::5]):
             left_out += 1

@@ -8,7 +8,7 @@ from ..moving import CannotCatch
 from ..registry import LIMITS, kind
 from ..segments import Motion, Piece
 from ..space import State
-from ..time_parameterization import TimeParameterization
+from ..waypoint_trajectory_generator import WaypointTrajectoryGenerator
 from . import _lane_f as f
 
 DEFAULT_PLACE_BACK_M = 0.05
@@ -17,8 +17,8 @@ DEFAULT_PLACE_BACK_M = 0.05
 @kind(use_cases=("conveyor_pick_and_place", "cycle_time", "tracking_eval"), needs=(*LIMITS, "forward_kinematics", "inverse_kinematics"),
       unchecked=("collision_model",), catalog_id="moving_pick_and_place")
 def moving_pick_and_place(space, target=None, place=None, *, lift_m=0.05, up=(0.0, 0.0, 1.0), sync_start_s=2.0, sync_window_s=0.5,
-                          time_parameterization=TimeParameterization.minimum_jerk(peak_speed_fraction=0.3),
-                          approach_time_parameterization=TimeParameterization.minimum_jerk(peak_speed_fraction=0.5), dwell_s=0.5,
+                          waypoint_generator=WaypointTrajectoryGenerator.minimum_jerk(peak_speed_fraction=0.3),
+                          approach_waypoint_generator=WaypointTrajectoryGenerator.minimum_jerk(peak_speed_fraction=0.5), dwell_s=0.5,
                           eef_step_m=0.001, tolerance_m=1e-4, label="U on a moving point", start=None):
     """``pick_and_place``'s U where the first point moves: approach above it, down onto it, dwell on it, up off it, over to
     above the second point, down, dwell, up. ``lift_m`` along ``up`` (base frame); the tool keeps its start orientation.
@@ -29,12 +29,12 @@ def moving_pick_and_place(space, target=None, place=None, *, lift_m=0.05, up=(0.
       start point at ``sync_start_s``, moving level at 5 cm/s; the second ``lift_m`` below it and 5 cm back along that line.
     - Down, dwell and up chase the first point (bam_traj_gen's ``sync_speed > 0``; ``TargetWaypoint(sync="chase")``): the tool
       is the point plus a vertical offset that ramps lift -> 0, holds 0 for ``sync_window_s`` from ``sync_start_s`` (the
-      synchronised window, ``sync`` in the segment entry), and ramps 0 -> lift. Each ramp takes the time ``time_parameterization`` gives the
+      synchronised window, ``sync`` in the segment entry), and ramps 0 -> lift. Each ramp takes the time ``waypoint_generator`` gives the
       joint move it amounts to, lengthened until every joint is inside its limits.
-    - The approach (``approach_time_parameterization``) is a joint-space leg that ends above the point moving with it; it waits at rest first
+    - The approach (``approach_waypoint_generator``) is a joint-space leg that ends above the point moving with it; it waits at rest first
       when it would arrive early. "Over" inherits the motion it starts in: a tool path from moving with the point to rest above
       the second point (velocity V (1 - s) + D s'/T), so the tool never stops on the moving point's line.
-    - The second half is ``pick_and_place``'s: straight lines under ``time_parameterization`` and a ``dwell_s`` dwell.
+    - The second half is ``pick_and_place``'s: straight lines under ``waypoint_generator`` and a ``dwell_s`` dwell.
 
     One segment, its pieces the U's eight parts. WHY one: from the approach to "over" the motion never stops (the point moves
     on), so no part of it can be split off and run alone; the kind is one call. Refused with ``CannotCatch`` as
@@ -75,8 +75,8 @@ def moving_pick_and_place(space, target=None, place=None, *, lift_m=0.05, up=(0.
         at sample ``at``."""
         above = f.solve(space, f.posed(rotation, np.asarray(moving.target(at / rate), float)[:3, 3] + lift), seed_q,
                         what=f"{label}: {1000 * lift_m:.1f} mm above the first point at t = {at / rate:.3f} s", tolerance_m=tolerance_m)
-        steps = max(int(np.ceil(time_parameterization.min_move_s * rate)),
-                    f.law_steps(space, time_parameterization, seed_q, above))
+        steps = max(int(np.ceil(waypoint_generator.min_move_s * rate)),
+                    f.law_steps(space, waypoint_generator, seed_q, above))
         ending = "last" in ends
 
         def make(count: int, stride: int):
@@ -104,22 +104,22 @@ def moving_pick_and_place(space, target=None, place=None, *, lift_m=0.05, up=(0.
     def make_over(count: int, stride: int):
         return f.coast(tool_top, velocity[0], count, rate, rotation, begin_s=t1 + rise_s, end_point=above_second, stride=stride)
 
-    over_steps = max(int(np.ceil(time_parameterization.min_move_s * rate)),
-                     f.law_steps(space, time_parameterization, top_out.q, goal), f.braking_steps(space, top_out.qd))
+    over_steps = max(int(np.ceil(waypoint_generator.min_move_s * rate)),
+                     f.law_steps(space, waypoint_generator, top_out.q, goal), f.braking_steps(space, top_out.qd))
     over = f.fitted(space, make_over, over_steps, top_out.q, label="over", first=top_out, tolerance_m=tolerance_m)
     descent_start = first - (len(down.t) - 1)
-    pieces, approach_notes = f.approach(space, start, top_in, descent_start, approach_time_parameterization, label="approach",
+    pieces, approach_notes = f.approach(space, start, top_in, descent_start, approach_waypoint_generator, label="approach",
                                         wait_label="wait at the start", point=down.channels["tool_target"][0], what=label)
     notes += approach_notes
 
     here = over.q[-1]
     pose_above, pose_place = f.posed(rotation, above_second), f.posed(rotation, np.asarray(place, float))
     lines = {"eef_step_m": eef_step_m, "tolerance_m": tolerance_m}
-    down_2 = follow(space, here, line(pose_above, pose_place), time_parameterization, length_m=lift_m,
+    down_2 = follow(space, here, line(pose_above, pose_place), waypoint_generator, length_m=lift_m,
                     label="down to the second point", **lines)
     rest = k.hold(down_2.q[-1], dwell_s, rate, label="dwell at the second point")
     rest_2 = Piece(rest.t, rest.q, rest.qd, rest.qdd, rest.label, channels=tool_target_hold(place, len(rest.t)))
-    up_2 = follow(space, down_2.q[-1], line(pose_place, pose_above), time_parameterization, length_m=lift_m,
+    up_2 = follow(space, down_2.q[-1], line(pose_place, pose_above), waypoint_generator, length_m=lift_m,
                   label="up from the second point", **lines)
     pieces += [down, dwell, up_1, over, down_2, *([rest_2] if dwell_s > 0 else []), up_2]
     return Motion(pieces, notes, {"assumes": moving.assumes, "sync": [t0, t1]})

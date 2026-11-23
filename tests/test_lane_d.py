@@ -451,8 +451,8 @@ def test_adept_cycle_on_both_robots():
         limits = space.limits
         assert max(np.abs(longest.velocities).max(axis=0).__truediv__(limits.max_velocity).max(),
                    np.abs(longest.accelerations).max(axis=0).__truediv__(limits.max_acceleration).max()) >= 0.9
-        slower_law = __import__("robot_trajectories").TimeParameterization.minimum_jerk(peak_speed_fraction=0.3)
-        slower = adept_cycle(space, start=start, time_parameterization=slower_law, **kwargs)
+        slower_law = __import__("robot_trajectories").WaypointTrajectoryGenerator.minimum_jerk(peak_speed_fraction=0.3)
+        slower = adept_cycle(space, start=start, waypoint_generator=slower_law, **kwargs)
         assert slower.t[-1] > trajectory.t[-1], "a slower law is not slower"
     twice = adept_cycle(fixtures.ur5e(), cycles=2, across=(0.0, 1.0, 0.0), across_m=0.2)
     assert len(labels(twice)) == 12

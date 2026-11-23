@@ -1,4 +1,4 @@
-"""A time-parameterization backend from outside the package: smoothstep legs, s = 3 tau^2 - 2 tau^3 (a cubic: continuous
+"""A waypoint-trajectory-generator backend from outside the package: smoothstep legs, s = 3 tau^2 - 2 tau^3 (a cubic: continuous
 velocity, the acceleration steps at the ends). Rest-to-rest only, one leg per pair of path points (it stops at each)."""
 
 from __future__ import annotations

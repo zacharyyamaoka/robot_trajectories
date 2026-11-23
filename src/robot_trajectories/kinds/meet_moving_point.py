@@ -4,7 +4,7 @@ import numpy as np
 
 from ..registry import LIMITS, kind
 from ..segments import Motion
-from ..time_parameterization import TimeParameterization
+from ..waypoint_trajectory_generator import WaypointTrajectoryGenerator
 from . import _lane_f as f
 
 
@@ -14,7 +14,7 @@ from . import _lane_f as f
 @kind(use_cases=("tracking_eval", "conveyor_pick_and_place"), needs=(*LIMITS, "forward_kinematics", "inverse_kinematics"),
       unchecked=("collision_model",), catalog_id="meet_moving_point", ends="moving")
 def meet_moving_point(space, target=None, *, sync_start_s=1.0, sync_end_s=1.3, pose_in_target=None, orientation="hold",
-                      time_parameterization=TimeParameterization.minimum_jerk(peak_speed_fraction=0.5), tolerance_m=1e-4,
+                      waypoint_generator=WaypointTrajectoryGenerator.minimum_jerk(peak_speed_fraction=0.5), tolerance_m=1e-4,
                       label="meet a moving point", start=None):
     """From rest, meet a point that moves at ``sync_start_s`` with its velocity matched and keep the tool on it to
     ``sync_end_s``, ending there MOVING with it: ``moving_target_track`` without the coast to rest. Times are on this
@@ -25,7 +25,7 @@ def meet_moving_point(space, target=None, *, sync_start_s=1.0, sync_end_s=1.3, p
       xyz / 4x4. Its ``assumes`` goes in the segment entry with ``sync`` = [t0, t1] (PEP 0002 §7: a prediction under it).
     - ``pose_in_target``: where the tool sits in the target's frame (an xyz offset or a 4x4); None is on the target.
     - ``orientation``: "hold" keeps the tool's start orientation; "follow" takes the target's (composed with the offset).
-    - ``time_parameterization``: the approach, a joint-space leg ending in the tracking state (the quintic through both states); it waits at
+    - ``waypoint_generator``: the approach, a joint-space leg ending in the tracking state (the quintic through both states); it waits at
       rest first when it would arrive early.
     - ``sync_end_s`` defaults to 0.3 s after the meet: long enough to prove the hand-over state is synchronised, short so the
       kind that follows does the tracking.
@@ -49,5 +49,5 @@ def meet_moving_point(space, target=None, *, sync_start_s=1.0, sync_end_s=1.3, p
     rotation = space.forward(start)[:3, :3] if orientation == "hold" else at_t0[:3, :3] @ offset[:3, :3]
     on_target = np.zeros(3) if pose_in_target is None else at_t0[:3, :3] @ offset[:3, 3]
     pieces, approach_notes, _ = f.meet(space, start, moving, first, last, rotation=rotation, offset=on_target,
-                                       time_parameterization=time_parameterization, label=label, tolerance_m=tolerance_m)
+                                       waypoint_generator=waypoint_generator, label=label, tolerance_m=tolerance_m)
     return Motion(pieces, [*notes, *approach_notes], {"assumes": moving.assumes, "sync": [t0, t1]})

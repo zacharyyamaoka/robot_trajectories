@@ -8,7 +8,7 @@ import numpy as np
 from .. import kernels as k
 from ..registry import kind
 from ..segments import Motion
-from ..time_parameterization import TimeParameterization
+from ..waypoint_trajectory_generator import WaypointTrajectoryGenerator
 
 RUNG_FRACTIONS = (0.2, 0.4, 0.6, 0.8, 0.9, 1.0)
 HELD_OUT_SPAN = (0.4, 0.9)  # a held-out move's |B - A| as a fraction of the repeat amplitude (pendulum_ladder)
@@ -17,12 +17,15 @@ HELD_OUT_ATTEMPTS = 2000
 PRELUDE_SPEED_FRACTION = 0.5  # the runner's move to the origin (experiments.PRELUDE_SPEED_FRACTION)
 
 
-def time_parameterizations(rung_fractions=RUNG_FRACTIONS, shape: str = "minimum_jerk") -> tuple[TimeParameterization, ...]:
-    """The ladder's timing: one time parameterization per rung over the same A-to-B path."""
-    return tuple(TimeParameterization(shape, peak_speed_fraction=fraction) for fraction in rung_fractions)
+def waypoint_trajectory_generators(rung_fractions=RUNG_FRACTIONS,
+                                   shape: str = "minimum_jerk") -> tuple[WaypointTrajectoryGenerator, ...]:
+    """The ladder's timing: one waypoint trajectory generator per rung over the same A-to-B path."""
+    return tuple(WaypointTrajectoryGenerator(shape, peak_speed_fraction=fraction) for fraction in rung_fractions)
 
 
-time_laws = time_parameterizations  # deprecated alias, silent (the rename of 2026-11-23; time_law.py says why)
+# deprecated aliases, silent (the renames of 2026-11-23; time_law.py and time_parameterization.py say why)
+time_laws = waypoint_trajectory_generators
+time_parameterizations = waypoint_trajectory_generators
 
 
 def held_out_pair(joint_name: str, seed: int, usable_low: float, usable_high: float, a0: float, b0: float,
@@ -47,7 +50,7 @@ def speed_ladder(space, joint=None, *, rung_fractions=RUNG_FRACTIONS, repeats=5,
     same input (``repeats``), plus held-out A/B pairs (``held_out``, scored only): tracking and stop accuracy as speed rises to
     the motor's limit (the pendulum campaign's frozen contract, pendulum_goal.py and pendulum_ladder.py).
 
-    One A-to-B path under several time parameterizations: ``time_parameterizations(rung_fractions, shape)``, and every rung plays the same A/B.
+    One A-to-B path under several waypoint trajectory generators: ``waypoint_trajectory_generators(rung_fractions, shape)``, and every rung plays the same A/B.
     Geometry as pendulum_ladder: the usable window is the room less a margin (``margin_rad`` or ``margin_fraction`` of the
     span, the larger) at both ends; A/B span it, A the end nearer the start; a held-out pair is drawn from a seed
     (campaign_round x 1000 + rung x 10 + k) spanning 0.4-0.9 of it. A rung whose peak the acceleration limit forbids is
@@ -75,11 +78,11 @@ def speed_ladder(space, joint=None, *, rung_fractions=RUNG_FRACTIONS, repeats=5,
         return q
 
     limits, rate = space.limits, space.rate_hz
-    prelude = TimeParameterization(shape, peak_speed_fraction=PRELUDE_SPEED_FRACTION)
+    prelude = WaypointTrajectoryGenerator(shape, peak_speed_fraction=PRELUDE_SPEED_FRACTION)
     pieces = [prelude.leg(start, at(a0), limits, rate, label=f"{label}: to A", dynamics=space.dynamics)]
     here = at(a0)
     clamped = []
-    for rung, law in enumerate(time_parameterizations(rung_fractions, shape)):
+    for rung, law in enumerate(waypoint_trajectory_generators(rung_fractions, shape)):
         percent = f"{100 * law.peak_speed_fraction:.0f} %"
         timing = law.leg_timing(at(a0), at(b0), limits)
         if timing.clamped:
@@ -93,7 +96,7 @@ def speed_ladder(space, joint=None, *, rung_fractions=RUNG_FRACTIONS, repeats=5,
             band = f"{label}: {percent} {what}"
             if not np.isclose(here[joint], a):
                 pieces.append(prelude.leg(here, at(a), limits, rate, label=f"{band}: to A", dynamics=space.dynamics))
-            # the same path, this rung's time parameterization: A -> B (dwell) -> A (dwell)
+            # the same path, this rung's waypoint trajectory generator: A -> B (dwell) -> A (dwell)
             pieces += [law.leg(at(a), at(b), limits, rate, label=f"{band}: A to B", dynamics=space.dynamics),
                        k.hold(at(b), dwell_s, rate, label=f"{band}: dwell at B"),
                        law.leg(at(b), at(a), limits, rate, label=f"{band}: B to A", dynamics=space.dynamics),

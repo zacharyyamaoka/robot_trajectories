@@ -42,7 +42,7 @@ SPACE_FORMAT = "robot_trajectories.space/1"
 
 class State(NamedTuple):
     """A joint state: positions, velocities, accelerations (each (J,)). A kind that declares ``starts="moving"`` is handed
-    its start as a State (from the JointTrajectory it continues), and a time parameterization can end in one."""
+    its start as a State (from the JointTrajectory it continues), and a waypoint trajectory generator can end in one."""
 
     q: np.ndarray
     qd: np.ndarray

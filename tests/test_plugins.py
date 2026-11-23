@@ -1,4 +1,4 @@
-"""Plugins arrive by entry point and are treated like built-ins: a kind and a time parameterization from tests/fixtures/plugin_site.
+"""Plugins arrive by entry point and are treated like built-ins: a kind and a waypoint trajectory generator from tests/fixtures/plugin_site.
 
     /home/bam/robot_trajectories/.venv/bin/python /home/bam/robot_trajectories/tests/test_plugins.py
 
@@ -46,17 +46,17 @@ def test_a_plugin_kind_is_listed_tagged_and_guarded_like_a_built_in():
     assert "kind ok" in out, out
 
 
-def test_a_plugin_time_parameterization_serves_any_path_kind():
+def test_a_plugin_waypoint_trajectory_generator_serves_any_path_kind():
     out = _run(
         "import numpy as np\n"
         "import robot_trajectories as rt\n"
         "from fixtures import robots\n"
         "from kind_contract import check_kind\n"
-        "laws = rt.time_parameterizations()\n"
+        "laws = rt.waypoint_trajectory_generators()\n"
         "assert [e.provider for e in laws['smoothstep_test']] == ['robot-trajectories-test-plugin'], laws['smoothstep_test']\n"
         "space = rt.JointSpace.from_limits(robots.PENDULUM_LIMITS)\n"
-        "law = rt.TimeParameterization('smoothstep_test', peak_speed_fraction=0.5)\n"
-        "tour = rt.joint_waypoints(space, [[0.2], [-0.2]], time_parameterization=law)\n"
+        "law = rt.WaypointTrajectoryGenerator('smoothstep_test', peak_speed_fraction=0.5)\n"
+        "tour = rt.joint_waypoints(space, [[0.2], [-0.2]], waypoint_generator=law)\n"
         "check_kind(tour, space)\n"
         "assert rt.recipe(tour).count('smoothstep_test') == 1\n"
         "assert np.max(np.abs(tour.velocities)) <= 0.5 * 2.0 * (1 + 1e-9), 'the speed fraction reached the backend'\n"
@@ -65,17 +65,17 @@ def test_a_plugin_time_parameterization_serves_any_path_kind():
         "    raise SystemExit('a rest-to-rest backend ended moving')\n"
         "except ValueError as error:\n"
         "    assert 'rest-to-rest' in str(error), error\n"
-        "print('time parameterization ok')\n"
+        "print('waypoint trajectory generator ok')\n"
     )
-    assert "time parameterization ok" in out, out
+    assert "waypoint trajectory generator ok" in out, out
 
 
-def test_without_the_plugin_its_time_parameterization_is_refused_naming_the_group():
+def test_without_the_plugin_its_waypoint_trajectory_generator_is_refused_naming_the_group():
     done = subprocess.run([sys.executable, "-c",
-                           "import robot_trajectories as rt\nrt.TimeParameterization('smoothstep_test', peak_speed_fraction=0.5)"],
+                           "import robot_trajectories as rt\nrt.WaypointTrajectoryGenerator('smoothstep_test', peak_speed_fraction=0.5)"],
                           capture_output=True, text=True, timeout=300, cwd=ROOT)
-    assert done.returncode != 0 and "robot_trajectories.time_parameterizations" in done.stderr, done.stderr[-2000:]
+    assert done.returncode != 0 and "robot_trajectories.waypoint_trajectory_generators" in done.stderr, done.stderr[-2000:]
 
 
 if __name__ == "__main__":
-    raise SystemExit(_runner.run(globals(), "test_plugins (entry points: kinds and time parameterizations)"))
+    raise SystemExit(_runner.run(globals(), "test_plugins (entry points: kinds and waypoint trajectory generators)"))

@@ -27,7 +27,8 @@ classifiers = [
 # a RobotDescription, a ReachMap, kinematics, a dynamics model or a collision checker enter by shape (joint_limits(),
 # joint_solutions / valid_mask, forward / inverse, torque, in_collision), never by import, so sim2real, apps and rigs can all
 # depend on this package and it depends on none of them; plugins (Ruckig, TOPP-RA) arrive by entry point
-# (robot_trajectories.kinds, robot_trajectories.time_parameterizations; the old robot_trajectories.time_laws is still read).
+# (robot_trajectories.kinds, robot_trajectories.waypoint_trajectory_generators; the older robot_trajectories.time_parameterizations
+# and robot_trajectories.time_laws are still read).
 # tests/test_boundary.py enforces it.
 dependencies = ["robot-msgs>=0.3.0", "numpy>=1.26"]
 

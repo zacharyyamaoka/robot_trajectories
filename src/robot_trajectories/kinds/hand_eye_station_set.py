@@ -6,7 +6,7 @@ import numpy as np
 
 from ..cartesian import Unreachable, rotation_angle, solve_points
 from ..registry import LIMITS, kind
-from ..time_parameterization import TimeParameterization
+from ..waypoint_trajectory_generator import WaypointTrajectoryGenerator
 from ._lane_d import pose_of, pose_set, rotation_about, rotation_between, try_solve, usable
 
 
@@ -29,7 +29,7 @@ def rotation_axes_spread(rotations: list[np.ndarray]) -> float:
       unchecked=("collision_model", "reach_map"), catalog_id="hand_eye_station_set")
 def hand_eye_station_set(space, *, stations=30, min_rotation_between_rad=0.52, check_set_stations=15, standoff_m=0.25,
                          cone_rad=0.8, roll_rad=1.2, focus_m=None, candidates=800, dwell_s=1.0,
-                         time_parameterization=TimeParameterization.minimum_jerk(peak_speed_fraction=0.5), seed=0,
+                         waypoint_generator=WaypointTrajectoryGenerator.minimum_jerk(peak_speed_fraction=0.5), seed=0,
                          label="hand-eye stations", start=None):
     """Tool poses around one point for AX = XB hand-eye calibration, then a held-out check set (a pose set: ``stations`` +
     ``check_set_stations`` stations, labelled ``"<label>: station k"``; the entry's ``check_set`` lists the check ones).
@@ -92,7 +92,7 @@ def hand_eye_station_set(space, *, stations=30, min_rotation_between_rad=0.52, c
     spread = rotation_axes_spread([p[:3, :3] for p in poses])
     points = [pose[:3, 3] for pose in poses]
     return pose_set(space, label, start, solutions, points=points, dwell_s=dwell_s,
-                    time_parameterization=time_parameterization, room=room, via=start,
+                    waypoint_generator=waypoint_generator, room=room, via=start,
                     notes=[f"smallest rotation between consecutive stations {math.degrees(min(turns)):.1f}°; rotation-axis spread "
                            f"(sigma_3 / sigma_1) {spread:.3f}"],
                     entry={"focus_m": [float(v) for v in focus], "check_set": list(range(stations + 1, total + 1)),

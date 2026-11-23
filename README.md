@@ -22,6 +22,24 @@ meaning is of things. that is why it works for like any robot type, or any task.
   parameters or labels. What a kind serves is a use-case tag.
 - **Every kind returns a robot_msgs JointTrajectory**, the type everything here joins on.
 
+## Names
+
+Zach (2026-11-23): "All TrajectoryGenerators output Trajectories... so yes there are many possible like type of generators but
+they all share that commonality". The stage is still *trajectory generation*; three ideas name what happens in it:
+
+- **`TrajectoryGenerator`**: anything that hands you back a robot_msgs `Trajectory` when you call it. Every kind here is one
+  (`joint_waypoints`, `chirp`, `pick_and_place`, `speed_ladder`, ...). It is a `typing.Protocol`; `isinstance` only checks
+  that the thing is callable, so the return type is the real contract.
+- **`WaypointTrajectoryGenerator`**: points and joint limits in, a `JointTrajectory` out. Minimum-jerk and trapezoid are
+  built in; Ruckig, Ruckig Pro and TOPP-RA come as plugins. A few points with the curve between left to the backend (Ruckig)
+  and a dense path followed exactly (TOPP-RA) are the same type: following the path exactly is what a backend does, not a
+  separate class.
+- **A kind hands its legs to one.** A path kind says where the joints go, then hands each leg's timing to the
+  `WaypointTrajectoryGenerator` you pass as `waypoint_generator=` (`approach_waypoint_generator=` for an approach leg).
+
+Formerly TimeLaw, then TimeParameterization; old names still import (as the same objects, silently), the `time_law=` and
+`time_parameterization=` keywords still work, and recipes keep their `"time_law"` keys.
+
 ## Quick start
 
 ```python
@@ -103,17 +121,16 @@ five-bar).
 
 ```python
 joint_waypoints(space, [[0.2, -1.4, 1.2, -1.4, -1.6, 0.0], [...]],
-                time_parameterization=TimeParameterization.trapezoid(peak_speed_fraction=0.8))
+                waypoint_generator=WaypointTrajectoryGenerator.trapezoid(peak_speed_fraction=0.8))
 move(space, joint="can11", targets_fraction=(0.5, -0.5))    # waypoints as fractions of the room around the start
 cartesian_waypoints(space, [p1, p2, p3], dwell_s=0.3)        # tool points
 ```
 
-Trajectory generation here is a path and its timing: a path kind takes a `TimeParameterization` (MoveIt's name for the role:
-a path and limits in, a timed trajectory out): `TimeParameterization.minimum_jerk(peak_speed_fraction=0.6)` or `move_s=`,
-`TimeParameterization.trapezoid(...)`, or a plugin's (`TimeParameterization("ruckig", ...)`). A leg may start or end moving
-(`start_state=`, `end_state=`: the quintic through both states), which is what a velocity-matched sync needs.
-
-`TimeParameterization`: formerly TimeLaw; the old names still import (and `time_law=` still works; recipes keep `"time_law"`).
+Trajectory generation here is a path and its timing: a path kind takes a `WaypointTrajectoryGenerator` (points and limits in,
+a timed trajectory out; MoveIt calls the role a time parameterization):
+`WaypointTrajectoryGenerator.minimum_jerk(peak_speed_fraction=0.6)` or `move_s=`, `WaypointTrajectoryGenerator.trapezoid(...)`,
+or a plugin's (`WaypointTrajectoryGenerator("ruckig", ...)`). A leg may start or end moving (`start_state=`, `end_state=`: the
+quintic through both states), which is what a velocity-matched sync needs.
 
 ## Segments and recipes
 
@@ -152,7 +169,7 @@ def sine_dwell(space, joint=None, *, frequency_hz=1.0, duration_s=10.0, fade_s=1
 The decorator refuses what the space lacks, guards the output (limits, jumps, rest, collisions), and records the call. The
 contract is PEP 0002 §4; `tests/kind_contract.py`'s `check_kind(trajectory, space)` holds a new kind to it.
 
-## Plugins: kinds and time parameterizations from other packages
+## Plugins: kinds and waypoint trajectory generators from other packages
 
 Simple kinds live here; anything that needs another library (Ruckig, TOPP-RA, a robot's own stack) is a separate package that
 registers by entry point, cut by role:
@@ -161,13 +178,14 @@ registers by entry point, cut by role:
 [project.entry-points."robot_trajectories.kinds"]
 my_kinds = "my_package.kinds"
 
-[project.entry-points."robot_trajectories.time_parameterizations"]
+[project.entry-points."robot_trajectories.waypoint_trajectory_generators"]
 ruckig = "robot_trajectories_ruckig:RuckigBackend"
 ```
 
-A plugin kind is listed, tagged and guarded like a built-in one; a time parameterization backend serves
-`TimeParameterization(name, ...)`. The group's old name, `robot_trajectories.time_laws`, is still read (a name declared in
-both is the new group's). Two providers of one time parameterization are refused (Ruckig Pro is a drop-in for `ruckig`, never
+A plugin kind is listed, tagged and guarded like a built-in one; a waypoint trajectory generator's backend serves
+`WaypointTrajectoryGenerator(name, ...)`. The group's older names, `robot_trajectories.time_parameterizations` and
+`robot_trajectories.time_laws`, are still read (a name declared in more than one is the newest group's). Two providers of one
+waypoint trajectory generator are refused (Ruckig Pro is a drop-in for `ruckig`, never
 installed beside Community), and a Ruckig backend never hands intermediate waypoints to Community (it sends them to Ruckig's
 cloud). `robot_trajectories.planners` and `.optimizers` are reserved for the later roles.
 
@@ -207,8 +225,8 @@ v6's motion, bit for bit:
 /home/bam/robot_trajectories/.venv/bin/python /home/bam/robot_trajectories/tests/test_equivalence.py
 ```
 
-The kind contract (decorator, guard, recipe, segments, moving boundaries, time-parameterization seam, injected slots, moving
-targets):
+The kind contract (decorator, guard, recipe, segments, moving boundaries, waypoint-trajectory-generator seam, injected slots,
+moving targets):
 
 ```bash
 /home/bam/robot_trajectories/.venv/bin/python /home/bam/robot_trajectories/tests/test_contract.py
@@ -226,10 +244,11 @@ Plugins by entry point:
 /home/bam/robot_trajectories/.venv/bin/python /home/bam/robot_trajectories/tests/test_plugins.py
 ```
 
-The rename of 2026-11-23 (the old `TimeLaw` names, the `time_law=` keyword and the old entry-point group still work):
+The renames of 2026-11-23 (the `TimeLaw` and `TimeParameterization` names, their keywords and their entry-point groups still
+work; `TrajectoryGenerator` holds what the kinds return):
 
 ```bash
-/home/bam/robot_trajectories/.venv/bin/python /home/bam/robot_trajectories/tests/test_time_parameterization_names.py
+/home/bam/robot_trajectories/.venv/bin/python /home/bam/robot_trajectories/tests/test_names.py
 ```
 
 v6's claims, carried over:

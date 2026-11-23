@@ -7,7 +7,7 @@ import numpy as np
 from .. import kernels as k
 from ..registry import kind
 from ..segments import Motion
-from ..time_parameterization import TimeParameterization
+from ..waypoint_trajectory_generator import WaypointTrajectoryGenerator
 
 CLASSES = ("pickplace", "cycle", "jog", "sweep")  # PID tuna's tapes.evaluation class names, kept as its data
 TRAIN_SEEDS = (0, 1, 2)  # the catalog's train_seeds
@@ -48,7 +48,7 @@ def deployment_motion_classes(space, joint=None, *, classes=CLASSES, seeds=TRAIN
     ``tapes.evaluation``: Zach's "send it random commands and lets see the performance").
 
     Faithful to PID tuna: the same draws in the same order from ``random.Random(seed)`` (targets as fractions of the room,
-    each leg's speed as a fraction of top speed, the holds), every leg a minimum-jerk TimeParameterization at that speed, and an explicit
+    each leg's speed as a fraction of top speed, the holds), every leg a minimum-jerk WaypointTrajectoryGenerator at that speed, and an explicit
     way home at 0.8 x speed. A seed here is that seed's tape there, scaled to this joint's room. Inside the limits: a leg the
     acceleration limit cannot take at its drawn speed runs as fast as the limit allows (and the notes count them)."""
     unknown = [name for name in classes if name not in CLASSES]
@@ -69,7 +69,7 @@ def deployment_motion_classes(space, joint=None, *, classes=CLASSES, seeds=TRAIN
             for target, speed_fraction, dwell_s in legs(motion_class, rng):
                 goal = start.copy()
                 goal[joint] += target * travel
-                law = TimeParameterization.minimum_jerk(peak_speed_fraction=speed_fraction, min_move_s=min_move_s)
+                law = WaypointTrajectoryGenerator.minimum_jerk(peak_speed_fraction=speed_fraction, min_move_s=min_move_s)
                 if not np.allclose(goal, here):
                     clamped += law.leg_timing(here, goal, space.limits).bound == "acceleration"
                     total += 1

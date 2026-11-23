@@ -179,6 +179,23 @@ closed-form FK/IK of its tool point (the bench geometry); the UR5e's DH forward 
 > still accepted, the old group is still read (the new one wins a name clash), and a recipe keeps its `"time_law"` keys, so
 > arm_motion_bench's frozen datasets rebuild unchanged. Undo: `git revert` the rename commit.
 
+> **Renamed again 2026-11-23** (Zach, later that day): "lets give it the name TrajectoryGenerator that specifically refers to
+> what this it it takes a patha nd terms it intro a trajecotrygenerator these ones are specially WaypointTrajectoryGenerators.
+> All TrajectoryGenerators output Trajectories... so yes there are many possible like type of generators but they all share
+> that commonality". So `TrajectoryGenerator` is the umbrella, anything that outputs a robot_msgs Trajectory (every kind; a
+> `typing.Protocol`, `trajectory_generator.py`), and the role this section describes is a `WaypointTrajectoryGenerator`:
+> points and joint limits in, a JointTrajectory out; a sparse point set and a dense path followed exactly are the same type
+> (following exactly is a property of the backend). `TimeParameterization` → `WaypointTrajectoryGenerator`,
+> `TimeParameterizationBackend` → `WaypointTrajectoryGeneratorBackend`, `register_time_parameterization` →
+> `register_waypoint_trajectory_generator`, `time_parameterizations()` → `waypoint_trajectory_generators()`,
+> `time_parameterization.py` → `waypoint_trajectory_generator.py`, `time_parameterization=` → `waypoint_generator=`,
+> `approach_time_parameterization=` → `approach_waypoint_generator=`, entry-point group
+> `robot_trajectories.time_parameterizations` → `robot_trajectories.waypoint_trajectory_generators`. Both older generations
+> stay silent aliases (the same objects); all three keyword spellings are accepted and more than one at once is a TypeError;
+> all three groups are read, newest first, and the newest wins a name. Recipes still record `"time_law"` /
+> `"approach_time_law"`, so the serialized format is byte-identical. The text below keeps the names of the day it was written.
+> Undo: `git revert` this rename's commit.
+
 `TimeParameterization(shape, peak_speed_fraction= | move_s=, min_move_s=, ramp_fraction=, options=)`. A path kind takes one as its timing
 argument (`Path x time parameterization -> JointTrajectory`, the refined spec). Built in: **minimum-jerk** (v6's, unchanged) and
 **trapezoid** (Pilz PTP's profile, a fixed ramp fraction). `law.leg(q0, q1, limits, rate, start_state=, end_state=,

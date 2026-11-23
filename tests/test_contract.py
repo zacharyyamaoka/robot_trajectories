@@ -3,7 +3,7 @@
     /home/bam/robot_trajectories/.venv/bin/python /home/bam/robot_trajectories/tests/test_contract.py
 
 The decorator (refusals, guard, recipe), segments (chain / split / repeat / annotate), moving boundaries (starts / ends
-"moving"), the time-parameterization backend seam (built-ins, a plugin's contract, ambiguity, the Ruckig Community rule), the injected
+"moving"), the waypoint-trajectory-generator backend seam (built-ins, a plugin's contract, ambiguity, the Ruckig Community rule), the injected
 slots (dynamics, collision, effort-commanded kinds) and the moving-target contract. The test kinds registered here have names
 starting ``contract_`` and live only in this module.
 """
@@ -20,9 +20,9 @@ import scenario
 from fixtures import robots
 from kind_contract import check_kind
 from robot_trajectories import (BoundaryState, CannotCatch, JointSpace, LinearMotion, MissingRung, Piece, TargetWaypoint,
-                                TimeParameterization, UnsafeTrajectory, annotate, as_moving_target, bands, cartesian_path,
-                                catalog, chain, hold, kind, labels, rebuild, recipe, register_time_parameterization, repeat,
-                                segment_info, split, step_train, synchronised, time_parameterizations)
+                                WaypointTrajectoryGenerator, UnsafeTrajectory, annotate, as_moving_target, bands, cartesian_path,
+                                catalog, chain, hold, kind, labels, rebuild, recipe, register_waypoint_trajectory_generator, repeat,
+                                segment_info, split, step_train, synchronised, waypoint_trajectory_generators)
 from robot_trajectories import kernels as k
 
 PENDULUM = scenario.pendulum_space()
@@ -59,7 +59,7 @@ def contract_ramp_out(space, joint=None, *, fraction=0.3, speed_fraction=0.3, la
     target[index] += fraction * (space.bounds.high - start)[index]
     velocity = np.zeros(space.dof)
     velocity[index] = speed_fraction * space.bounds.max_velocity[index]
-    return TimeParameterization.minimum_jerk(peak_speed_fraction=0.6).leg(start, target, space.limits, space.rate_hz, label=label,
+    return WaypointTrajectoryGenerator.minimum_jerk(peak_speed_fraction=0.6).leg(start, target, space.limits, space.rate_hz, label=label,
                                                                           end_state=BoundaryState(velocity, np.zeros(space.dof)))
 
 
@@ -69,7 +69,7 @@ def contract_ramp_in(space, joint=None, *, fraction=0.2, label="ramp in", start=
     index = space.joint_index(joint)
     target = start.q.copy()
     target[index] += fraction * (space.bounds.high - start.q)[index]
-    return TimeParameterization.minimum_jerk(peak_speed_fraction=0.6).leg(start.q, target, space.limits, space.rate_hz,
+    return WaypointTrajectoryGenerator.minimum_jerk(peak_speed_fraction=0.6).leg(start.q, target, space.limits, space.rate_hz,
                                                                           label=label,
                                                                           start_state=BoundaryState(start.qd, start.qdd))
 
@@ -210,7 +210,7 @@ def test_chain_refuses_a_moving_end_followed_by_a_rest_start():
 
 def test_a_trapezoid_refuses_a_moving_end_by_name():
     try:
-        TimeParameterization.trapezoid(peak_speed_fraction=0.5).leg(np.zeros(1), np.ones(1) * 0.1, PENDULUM.limits, 500.0,
+        WaypointTrajectoryGenerator.trapezoid(peak_speed_fraction=0.5).leg(np.zeros(1), np.ones(1) * 0.1, PENDULUM.limits, 500.0,
                                                                     end_state=BoundaryState(np.ones(1) * 0.2, np.zeros(1)))
     except ValueError as error:
         assert "rest-to-rest" in str(error)
@@ -218,11 +218,11 @@ def test_a_trapezoid_refuses_a_moving_end_by_name():
         raise AssertionError("a trapezoid ended moving")
 
 
-# ---------------------------------------------------------------------- the time-parameterization seam
+# ---------------------------------------------------------------------- the waypoint-trajectory-generator seam
 
 
 class _Straight:
-    """A plugin-shaped time parameterization: a two-point leg via the built-in minimum-jerk, refusing more points (Ruckig
+    """A plugin-shaped waypoint trajectory generator: a two-point leg via the built-in minimum-jerk, refusing more points (Ruckig
     Community's rule)."""
 
     name = "contract_community_like"
@@ -233,7 +233,7 @@ class _Straight:
     def time_parameterize(self, path_points, limits, rate_hz, law, *, start_state=None, end_state=None):
         from robot_msgs.trajectory import JointTrajectory
 
-        arrays = TimeParameterization.minimum_jerk(peak_speed_fraction=1.0).leg(path_points[0], path_points[-1], limits, rate_hz)
+        arrays = WaypointTrajectoryGenerator.minimum_jerk(peak_speed_fraction=1.0).leg(path_points[0], path_points[-1], limits, rate_hz)
         return JointTrajectory(t=arrays.t, joint_names=tuple(limits.joint_names), positions=arrays.q, velocities=arrays.qd,
                                accelerations=arrays.qdd)
 
@@ -246,11 +246,11 @@ class _Broken(_Straight):
         return out.replace(positions=out.positions + 0.01)  # does not start where it should
 
 
-def test_time_parameterization_backends_are_one_seam():
-    laws = time_parameterizations()
+def test_waypoint_trajectory_generator_backends_are_one_seam():
+    laws = waypoint_trajectory_generators()
     assert [entry.provider for entry in laws["minimum_jerk"]] == ["robot_trajectories"] and "trapezoid" in laws
-    register_time_parameterization(_Straight(), provider="contract-test")
-    law = TimeParameterization("contract_community_like", peak_speed_fraction=0.5)
+    register_waypoint_trajectory_generator(_Straight(), provider="contract-test")
+    law = WaypointTrajectoryGenerator("contract_community_like", peak_speed_fraction=0.5)
     leg = law.leg(np.zeros(1), np.full(1, 0.2), PENDULUM.limits, 500.0)
     assert abs(leg.q[-1, 0] - 0.2) < 1e-12 and np.max(np.abs(leg.qd)) <= 0.5 * 2.0 * (1 + 1e-9), "the speed fraction scaled the limits"
     try:
@@ -259,24 +259,24 @@ def test_time_parameterization_backends_are_one_seam():
         assert "cloud" in str(error), str(error)
     else:
         raise AssertionError("a backend's own refusal (can_service) was not honoured")
-    register_time_parameterization(_Broken(), provider="contract-test")
+    register_waypoint_trajectory_generator(_Broken(), provider="contract-test")
     try:
-        TimeParameterization("contract_broken", peak_speed_fraction=0.5).leg(np.zeros(1), np.full(1, 0.2), PENDULUM.limits, 500.0)
+        WaypointTrajectoryGenerator("contract_broken", peak_speed_fraction=0.5).leg(np.zeros(1), np.full(1, 0.2), PENDULUM.limits, 500.0)
     except ValueError as error:
         assert "broke the contract" in str(error)
     else:
         raise AssertionError("a backend that broke the contract was used")
-    register_time_parameterization(_Straight(), provider="another-distribution")
+    register_waypoint_trajectory_generator(_Straight(), provider="another-distribution")
     try:
-        TimeParameterization("contract_community_like", peak_speed_fraction=0.5)
+        WaypointTrajectoryGenerator("contract_community_like", peak_speed_fraction=0.5)
     except ValueError as error:
         assert "ambiguous" in str(error)
     else:
-        raise AssertionError("two providers of one time parameterization were not refused")
+        raise AssertionError("two providers of one waypoint trajectory generator were not refused")
 
 
 class _NeedsDynamics:
-    """A plugin-shaped time parameterization that needs the space's dynamics in one mode (TOPP-RA's torque mode has this shape): with the
+    """A plugin-shaped waypoint trajectory generator that needs the space's dynamics in one mode (TOPP-RA's torque mode has this shape): with the
     option ``torque`` its ``needs(law)`` names dynamics_model and torque_limits. Minimum-jerk underneath; it records what it was
     handed, and with the option ``too_fast`` hands back a leg the model cannot drive within max_effort."""
 
@@ -289,49 +289,49 @@ class _NeedsDynamics:
         return ("dynamics_model", "torque_limits") if dict(law.options).get("torque") else ()
 
     def time_parameterize(self, path_points, limits, rate_hz, law, **handed):
-        from robot_trajectories.time_parameterization import BuiltInBackend
+        from robot_trajectories.waypoint_trajectory_generator import BuiltInBackend
 
         self.handed.append(dict(handed))
-        plain = TimeParameterization.minimum_jerk(move_s=0.15) if dict(law.options).get("too_fast") else law
+        plain = WaypointTrajectoryGenerator.minimum_jerk(move_s=0.15) if dict(law.options).get("too_fast") else law
         return BuiltInBackend("minimum_jerk").time_parameterize(path_points, limits, rate_hz, plain,
                                                                 start_state=handed.get("start_state"),
                                                                 end_state=handed.get("end_state"))
 
 
-def test_a_time_parameterization_that_needs_the_dynamics_is_handed_the_space_s():
+def test_a_waypoint_trajectory_generator_that_needs_the_dynamics_is_handed_the_space_s():
     from fixtures import lane_b
 
     probe = _NeedsDynamics()
-    register_time_parameterization(probe, provider="contract-test")
-    torque_law = TimeParameterization("contract_needs_dynamics", peak_speed_fraction=0.5, options={"torque": True})
+    register_waypoint_trajectory_generator(probe, provider="contract-test")
+    torque_law = WaypointTrajectoryGenerator("contract_needs_dynamics", peak_speed_fraction=0.5, options={"torque": True})
     space = lane_b.pendulum_space()  # CAN 11's limits, a 5 N·m stand-in max_effort, the CAN 11 dynamics stand-in
     waypoints = [[0.1], [-0.1]]
     from robot_trajectories import joint_waypoints, move
 
-    check_kind(joint_waypoints(space, waypoints, time_parameterization=torque_law), space)
+    check_kind(joint_waypoints(space, waypoints, waypoint_generator=torque_law), space)
     assert probe.handed and all(entry["dynamics"] is space.dynamics for entry in probe.handed), "legs_through did not hand it on"
     probe.handed.clear()
-    move(space, time_parameterization=torque_law)
+    move(space, waypoint_generator=torque_law)
     assert probe.handed and all(entry["dynamics"] is space.dynamics for entry in probe.handed), "move did not hand it on"
     arm = lane_b.ur5e_space()  # kinematics, dynamics and a max_effort: cartesian.follow hands the dynamics to along()
     probe.handed.clear()
-    check_kind(cartesian_path(arm, [arm.forward(arm.home)[:3, 3] + (0.05, 0.0, 0.0)], time_parameterization=torque_law), arm)
+    check_kind(cartesian_path(arm, [arm.forward(arm.home)[:3, 3] + (0.05, 0.0, 0.0)], waypoint_generator=torque_law), arm)
     assert probe.handed and probe.handed[-1]["dynamics"] is arm.dynamics, "cartesian.follow did not hand it on"
     probe.handed.clear()
     joint_waypoints(space, waypoints,
-                    time_parameterization=TimeParameterization("contract_needs_dynamics", peak_speed_fraction=0.5))
+                    waypoint_generator=WaypointTrajectoryGenerator("contract_needs_dynamics", peak_speed_fraction=0.5))
     assert probe.handed and all("dynamics" not in entry for entry in probe.handed), "a backend that does not need it was handed it"
     for bare, need in ((scenario.pendulum_space(), "dynamics_model"),
                        (JointSpace.from_limits(robots.PENDULUM_LIMITS).with_dynamics(lane_b.Can11Dynamics()), "torque_limits")):
         try:
-            joint_waypoints(bare, waypoints, time_parameterization=torque_law)
+            joint_waypoints(bare, waypoints, waypoint_generator=torque_law)
         except MissingRung as error:
             assert error.need == need and "contract_needs_dynamics" in str(error) and "Add it" in str(error), str(error)
         else:
-            raise AssertionError(f"a time parameterization that needs {need} ran without it")
+            raise AssertionError(f"a waypoint trajectory generator that needs {need} ran without it")
     try:  # the caller holds the model's torque along the backend's result to max_effort (an independent ruler)
         joint_waypoints(lane_b.pendulum_space(max_effort_nm=1.0), [[0.3]],
-                        time_parameterization=TimeParameterization("contract_needs_dynamics", peak_speed_fraction=1.0,
+                        waypoint_generator=WaypointTrajectoryGenerator("contract_needs_dynamics", peak_speed_fraction=1.0,
                                                                    options={"torque": True, "too_fast": True}))
     except ValueError as error:
         assert "broke the contract" in str(error) and "max_effort" in str(error), str(error)
@@ -350,48 +350,48 @@ class _AlwaysNeedsDynamics(_NeedsDynamics):
 NO_PLUGIN_LAW = {"input_shaped_move"}
 
 
-def test_every_kind_that_takes_a_time_parameterization_hands_the_backend_the_space_s_dynamics():
+def test_every_kind_that_takes_a_waypoint_trajectory_generator_hands_the_backend_the_space_s_dynamics():
     from fixtures import lane_b
 
     import robot_trajectories as rt
 
     probe = _AlwaysNeedsDynamics()
-    register_time_parameterization(probe, provider="contract-test")
-    law = TimeParameterization("contract_always_dynamics", peak_speed_fraction=0.5)
+    register_waypoint_trajectory_generator(probe, provider="contract-test")
+    law = WaypointTrajectoryGenerator("contract_always_dynamics", peak_speed_fraction=0.5)
     pendulum, five, arm = lane_b.pendulum_space(), lane_b.fivebar_space(), lane_b.ur5e_space()  # each with dynamics and max_effort
     tool = arm.forward(arm.home)[:3, 3]
     calls = {
-        "move": lambda: rt.move(pendulum, time_parameterization=law),
-        "joint_waypoints": lambda: rt.joint_waypoints(pendulum, [[0.1], [-0.1]], time_parameterization=law),
-        "repeat_floor_tape": lambda: rt.repeat_floor_tape(pendulum, time_parameterization=law),
-        "via_point_spline": lambda: rt.via_point_spline(pendulum, time_parameterization=law),
+        "move": lambda: rt.move(pendulum, waypoint_generator=law),
+        "joint_waypoints": lambda: rt.joint_waypoints(pendulum, [[0.1], [-0.1]], waypoint_generator=law),
+        "repeat_floor_tape": lambda: rt.repeat_floor_tape(pendulum, waypoint_generator=law),
+        "via_point_spline": lambda: rt.via_point_spline(pendulum, waypoint_generator=law),
         "speed_ladder": lambda: rt.speed_ladder(pendulum, shape="contract_always_dynamics"),
-        "space_filling_pose_set": lambda: rt.space_filling_pose_set(arm, time_parameterization=law),
-        "cartesian_path": lambda: rt.cartesian_path(arm, [tool + (0.05, 0.0, 0.0)], time_parameterization=law),
-        "cartesian_waypoints": lambda: rt.cartesian_waypoints(arm, [tool + (0.05, 0.0, 0.0)], time_parameterization=law),
+        "space_filling_pose_set": lambda: rt.space_filling_pose_set(arm, waypoint_generator=law),
+        "cartesian_path": lambda: rt.cartesian_path(arm, [tool + (0.05, 0.0, 0.0)], waypoint_generator=law),
+        "cartesian_waypoints": lambda: rt.cartesian_waypoints(arm, [tool + (0.05, 0.0, 0.0)], waypoint_generator=law),
         "cartesian_a_to_b": lambda: rt.cartesian_a_to_b(arm, tool + (0.05, 0.05, -0.05), via=(tuple(tool + (0.05, 0.0, 0.0)),),
-                                                         time_parameterization=law),
-        "cartesian_arc": lambda: rt.cartesian_arc(arm, time_parameterization=law),
-        "approach_retreat": lambda: rt.approach_retreat(arm, time_parameterization=law),
-        "adept_cycle": lambda: rt.adept_cycle(arm, time_parameterization=law),
+                                                         waypoint_generator=law),
+        "cartesian_arc": lambda: rt.cartesian_arc(arm, waypoint_generator=law),
+        "approach_retreat": lambda: rt.approach_retreat(arm, waypoint_generator=law),
+        "adept_cycle": lambda: rt.adept_cycle(arm, waypoint_generator=law),
         "pick_and_place": lambda: rt.pick_and_place(arm, tool + (0.08, -0.08, -0.12), tool + (-0.08, 0.10, -0.12), lift_m=0.08,
-                                                     time_parameterization=law, approach_time_parameterization=law),
-        "kinematic_calibration_pose_set": lambda: rt.kinematic_calibration_pose_set(arm, time_parameterization=law),
-        "camera_board_views": lambda: rt.camera_board_views(arm, time_parameterization=law),
-        "hand_eye_station_set": lambda: rt.hand_eye_station_set(arm, time_parameterization=law),
-        "power_up_random_rests": lambda: rt.power_up_random_rests(five, time_parameterization=law),
-        "quasi_static_pose_holds": lambda: rt.quasi_static_pose_holds(five, time_parameterization=law),
-        "weightless_float": lambda: rt.weightless_float(five, time_parameterization=law),
-        "moving_target_track": lambda: rt.moving_target_track(arm, time_parameterization=law),
-        "meet_moving_point": lambda: rt.meet_moving_point(arm, time_parameterization=law),
-        "track_and_release": lambda: rt.track_and_release(arm, time_parameterization=law, start=rt.meet_moving_point(arm)),
-        "moving_pick_and_place": lambda: rt.moving_pick_and_place(arm, time_parameterization=law,
-                                                                   approach_time_parameterization=law),
+                                                     waypoint_generator=law, approach_waypoint_generator=law),
+        "kinematic_calibration_pose_set": lambda: rt.kinematic_calibration_pose_set(arm, waypoint_generator=law),
+        "camera_board_views": lambda: rt.camera_board_views(arm, waypoint_generator=law),
+        "hand_eye_station_set": lambda: rt.hand_eye_station_set(arm, waypoint_generator=law),
+        "power_up_random_rests": lambda: rt.power_up_random_rests(five, waypoint_generator=law),
+        "quasi_static_pose_holds": lambda: rt.quasi_static_pose_holds(five, waypoint_generator=law),
+        "weightless_float": lambda: rt.weightless_float(five, waypoint_generator=law),
+        "moving_target_track": lambda: rt.moving_target_track(arm, waypoint_generator=law),
+        "meet_moving_point": lambda: rt.meet_moving_point(arm, waypoint_generator=law),
+        "track_and_release": lambda: rt.track_and_release(arm, waypoint_generator=law, start=rt.meet_moving_point(arm)),
+        "moving_pick_and_place": lambda: rt.moving_pick_and_place(arm, waypoint_generator=law,
+                                                                   approach_waypoint_generator=law),
     }
     takes_a_law = {name for name, info in rt.kinds().items()
-                   if "time_parameterization" in info.parameters or name == "speed_ladder"}
+                   if "waypoint_generator" in info.parameters or name == "speed_ladder"}
     missing = sorted(takes_a_law - set(calls) - NO_PLUGIN_LAW - {"envelope_challenge"})
-    assert not missing, f"kinds that take a time parameterization but are not held to hand it the dynamics here: {missing}"
+    assert not missing, f"kinds that take a waypoint trajectory generator but are not held to hand it the dynamics here: {missing}"
     unreached = []
     for name, call in calls.items():
         probe.handed.clear()
@@ -402,7 +402,7 @@ def test_every_kind_that_takes_a_time_parameterization_hands_the_backend_the_spa
             continue
         if not probe.handed or any(entry.get("dynamics") is None for entry in probe.handed):
             unreached.append(name)
-    assert not unreached, f"the time-parameterization backend was not handed the space's dynamics by: {unreached}"
+    assert not unreached, f"the waypoint-trajectory-generator backend was not handed the space's dynamics by: {unreached}"
 
 
 # ---------------------------------------------------------------------- injected slots: dynamics, effort, collision

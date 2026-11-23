@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from ..registry import LIMITS, kind
 from ..segments import annotate, chain, repeat
-from ..time_parameterization import TimeParameterization
+from ..waypoint_trajectory_generator import WaypointTrajectoryGenerator
 from .hold import hold
 from .joint_waypoints import joint_waypoints
 
@@ -33,7 +33,7 @@ def endurance_duty_cycle(space, *, cycles=10, duty_type="S1", duty_fraction=0.6,
     out = start + reach_fraction * (room.high - start)
     across = start - reach_fraction * (start - room.low)
     motion = annotate(joint_waypoints(space, [out, across],
-                                      time_parameterization=TimeParameterization.minimum_jerk(peak_speed_fraction=speed_fraction),
+                                      waypoint_generator=WaypointTrajectoryGenerator.minimum_jerk(peak_speed_fraction=speed_fraction),
                                       dwell_s=dwell_s, back_to_start=True, label=f"{label} motion", start=start),
                       f"the duty cycle's motion: out to {reach_fraction:g} of the room, across, back; {duty_type}")
     cycle = motion

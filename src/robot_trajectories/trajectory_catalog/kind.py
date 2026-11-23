@@ -1,4 +1,5 @@
-"""One kind of trajectory the planned JointTrajectoryGenerator can make: the record every catalog entry is.
+"""One kind of trajectory, the record every catalog entry is. Every kind is a TrajectoryGenerator (it outputs a robot_msgs
+Trajectory: ``robot_trajectories.TrajectoryGenerator``), and the catalog lists them.
 
 Zach (Daily Note, 2026-11-18): "There are lots of fun different types of trajectories like the workspace sweap, the chirps, the steps
 ... Some trajectories are good for testing like PIDs ... I want like a library or Catalog of all the different trajectories."
