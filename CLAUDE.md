@@ -25,6 +25,9 @@ changing the API. Adding kinds: `docs/KINDS_TODO.md` is the contract the lanes w
   deliberately: edit below the provenance comment, update `KERNELS_SHA256` and the digests in `tests/test_equivalence.py`.
 - **v6's motion is held bit for bit** (`tests/test_equivalence.py`: the scenario, the week, the tapes, every ported kind and
   plan on three robots). A digest changes only with a deliberate change to the motion, said in the commit message.
+- **Bit for bit only where numpy dispatches AVX512_SKX** (AVX2-only CPUs, e.g. CI's EPYC 7763, differ by <= 7.1e-12); every CPU
+  holds the same trajectories to stored fingerprints (`tests/_v6_fingerprint.py`; after a deliberate digest change re-take
+  `tests/v6_fingerprints.npz` with `--write` on an AVX-512 machine), and CI reruns `test_equivalence.py` under AVX2 dispatch.
 - **SI in code; degrees on every display** (summaries, notes, `describe()`).
 - Missing something robot_msgs should have? Write it here and propose the move in a PEP; never edit robot_msgs from here.
 

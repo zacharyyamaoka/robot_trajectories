@@ -13,3 +13,10 @@ jobs:
       - run: uv run --isolated --no-sources --python ${{ matrix.python }} --extra test python -m pytest -q
         env:
           MPLBACKEND: Agg
+      # WHY: v6's digests hold only where numpy dispatches AVX512_SKX; this rerun holds numpy to AVX2 (what an EPYC 7763
+      # runner dispatches) so the fingerprint tier of tests/test_equivalence.py runs on every push, whatever the runner's CPU.
+      - name: v6 equivalence under AVX2 dispatch (the fingerprint tier)
+        run: uv run --isolated --no-sources --python ${{ matrix.python }} --extra test python -m pytest -q tests/test_equivalence.py
+        env:
+          MPLBACKEND: Agg
+          NPY_ENABLE_CPU_FEATURES: "SSE SSE2 SSE3 SSSE3 SSE41 POPCNT SSE42 AVX F16C FMA3 AVX2"

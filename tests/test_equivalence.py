@@ -1,6 +1,19 @@
-"""The signal library makes v6's motion, bit for bit: the round's results (its ruler, v6's claims, this week's tapes) hold here.
+"""The signal library makes v6's motion, bit for bit where numpy dispatches as v6's machine did and to within a stored
+fingerprint on every CPU: the round's results (its ruler, v6's claims, this week's tapes) hold here.
 
     /home/bam/robot_trajectories/.venv/bin/python /home/bam/robot_trajectories/tests/test_equivalence.py
+
+What is exact, where, and why. numpy picks its SIMD kernels for sin/cos/exp at run time, and its AVX2 kernels round
+differently from its AVX512_SKX ones in the last bits. Measured 2026-11-23 (tests/_v6_fingerprint.py has the detail): 6 of 6
+AVX-512 GitHub runners matched v6 bit for bit; 3 of 3 EPYC 7763 (Zen 3, AVX2 only) differed in the same 29,520 of 1.74 M
+values, by up to 7.1e-12 (the week's accelerations; positions <= 7.8e-16). So every trajectory below is held two ways:
+- Exact tier, where numpy dispatches AVX512_SKX (``EXACT``): its sha256 digest equals v6's, bit for bit, as before.
+- Every tier, AVX2-only CPUs included: its stored fingerprint (tests/v6_fingerprints.npz) holds. Per array: the length
+  exactly; the first and last value to 1e-8 + 1e-9 * |v6|; 16 fixed-seed Gaussian projections to 1e-8, 73x the worst
+  AVX2 dispatch noise (1.4e-10), while a 1e-6 change to any one value moves some projection >= 41x the tolerance
+  (tests/test_v6_fingerprint.py). Checked on the exact tier too, so the store stays honest; a failure names the tier.
+CI runs this file a second time with NPY_ENABLE_CPU_FEATURES set to AVX2's features (_v6_fingerprint.AVX2_FEATURES), so the
+fingerprint tier runs on every push whatever CPU the runner has.
 
 - The vendored kernels are the round's file byte for byte (below the provenance comment).
 - The scenario's pendulum session (joined and each segment), five-bar and UR5e sessions, the week and each of its eight
@@ -16,7 +29,8 @@ Not held any more, deliberately (0.1.0, PEP 0002): v6's config TEXT (the pendulu
 the tapes' ``.config.json`` files). The configuration is now a recipe of calls (``.recipe.json``), a new format; what it makes
 is held above, sample for sample, and every recipe here is held to rebuild its trajectory exactly.
 
-A deliberate change to the motion changes these digests: re-derive them and say why in the commit message.
+A deliberate change to the motion changes these digests: re-derive them, re-take the fingerprints on an AVX-512 machine
+(``python tests/_v6_fingerprint.py --write``, which refuses unless every digest here matches) and say why in the commit message.
 """
 
 from __future__ import annotations
@@ -31,6 +45,7 @@ import numpy as np
 from robot_msgs import load_npz
 
 import _runner
+import _v6_fingerprint as fingerprint
 import scenario
 from fixtures import robots
 from robot_trajectories import chain, kinds, labels, rebuild, recipe, speed_ladder, split, this_week
@@ -70,6 +85,8 @@ V6 = {
     },
 }
 ARRAYS = ("t", "positions", "velocities", "accelerations")
+EXACT = fingerprint.exact_dispatch()  # numpy dispatches AVX512_SKX, as v6's machine did: the digests hold bit for bit
+TIER = fingerprint.tier()
 
 
 def digest(trajectory) -> str:
@@ -77,6 +94,14 @@ def digest(trajectory) -> str:
     for name in ARRAYS:
         hasher.update(np.ascontiguousarray(getattr(trajectory, name), dtype=np.float64).tobytes())
     return hasher.hexdigest()
+
+
+def held(trajectory, expected: str, label: str) -> None:
+    """``trajectory`` is v6's ``expected`` (a digest here): bit for bit on the exact tier, and its fingerprint on every tier."""
+    if EXACT:
+        assert digest(trajectory) == expected, label
+    problem = fingerprint.check(trajectory, expected)
+    assert problem is None, f"{label}: {problem} ({TIER})"
 
 
 def test_vendored_kernels_are_the_rounds_byte_for_byte():
@@ -96,23 +121,28 @@ def test_example_limits_are_the_fixtures():
 
 def test_scenario_is_v6_bit_for_bit():
     session = scenario.pendulum()
-    assert digest(session) == V6["pendulum"], "pendulum session"
-    assert tuple(digest(segment) for segment in split(session)) == V6["pendulum_segments"], "pendulum segments"
-    assert digest(rebuild(recipe(session))) == V6["pendulum"], "the pendulum session rebuilt from its recipe"
-    assert digest(scenario.fivebar()) == V6["fivebar"], "five-bar session"
-    assert digest(scenario.ur5e()) == V6["ur5e"], "UR5e session"
+    held(session, V6["pendulum"], "pendulum session")
+    segments = split(session)
+    if EXACT:
+        assert tuple(digest(segment) for segment in segments) == V6["pendulum_segments"], "pendulum segments"
+    assert len(segments) == len(V6["pendulum_segments"]), f"pendulum segments: {len(segments)} ({TIER})"
+    for index, (segment, expected) in enumerate(zip(segments, V6["pendulum_segments"], strict=True)):
+        held(segment, expected, f"pendulum segment {index}")
+    held(rebuild(recipe(session)), V6["pendulum"], "the pendulum session rebuilt from its recipe")
+    held(scenario.fivebar(), V6["fivebar"], "five-bar session")
+    held(scenario.ur5e(), V6["ur5e"], "UR5e session")
 
 
 def test_week_is_v6_bit_for_bit():
     limits, _ = this_week.read_limits(EXAMPLE)
     week = this_week.week(limits, "can11")
-    assert digest(week) == V6["week"], "the week, joined"
+    held(week, V6["week"], "the week, joined")
     names = [this_week.tape_name(index, label) for index, label in enumerate(labels(week), start=1)]
     assert names == list(V6["tapes"]), names
     for name, segment in zip(names, split(week), strict=True):
-        assert digest(segment) == V6["tapes"][name], name
-        assert digest(rebuild(segment)) == V6["tapes"][name], f"{name} rebuilt from its own recipe"
-    assert digest(chain(*split(week))) == V6["week"], "chain(*split(week)) is the week"
+        held(segment, V6["tapes"][name], name)
+        held(rebuild(segment), V6["tapes"][name], f"{name} rebuilt from its own recipe")
+    held(chain(*split(week)), V6["week"], "chain(*split(week)) is the week")
 
 
 # v6 at robot_trajectories 0.0.1 (138fc43): every record class with its defaults (one joint where it takes one; the floor tape
@@ -195,8 +225,15 @@ def _ported(robot: str, name: str):
 
 
 def test_every_ported_kind_and_plan_is_v6_on_every_robot():
-    different = [key for key, expected in V6_KINDS.items() if digest(_ported(*key.split("/"))) != expected]
+    different, off = [], []
+    for key, expected in V6_KINDS.items():  # one at a time: the largest (ur5e/workspace_survey) is 2.6 M values per array
+        trajectory = _ported(*key.split("/"))
+        if EXACT and digest(trajectory) != expected:
+            different.append(key)
+        if problem := fingerprint.check(trajectory, expected):
+            off.append(f"{key}: {problem}")
     assert not different, different
+    assert not off, f"{off} ({TIER})"
 
 
 def test_this_week_cli_writes_v6s_tapes():
@@ -204,18 +241,49 @@ def test_this_week_cli_writes_v6s_tapes():
         assert this_week.main(["--limits", str(EXAMPLE), "--out", folder]) == 0
         out = pathlib.Path(folder)
         for name, expected in V6["tapes"].items():
-            assert digest(load_npz(out / f"{name}.trajectory.npz")) == expected, name
-        assert digest(load_npz(out / "week.trajectory.npz")) == V6["week"], "week.trajectory.npz"
+            held(load_npz(out / f"{name}.trajectory.npz"), expected, name)
+        held(load_npz(out / "week.trajectory.npz"), V6["week"], "week.trajectory.npz")
         for name in V6["tapes"]:
-            assert digest(rebuild((out / f"{name}.recipe.json").read_text())) == V6["tapes"][name], f"{name}.recipe.json rebuilds it"
+            held(rebuild((out / f"{name}.recipe.json").read_text()), V6["tapes"][name], f"{name}.recipe.json rebuilds it")
         if not V6_TAPES.is_dir():
-            _runner.skip(f"v6's tape files are not here ({V6_TAPES}); the digests above held")
+            _runner.skip(f"v6's tape files are not here ({V6_TAPES}); the checks above held ({TIER})")
         for name in (*V6["tapes"], "week"):
             mine, theirs = load_npz(out / f"{name}.trajectory.npz"), load_npz(V6_TAPES / f"{name}.trajectory.npz")
             for array in ARRAYS:
-                assert np.array_equal(getattr(mine, array), getattr(theirs, array)), (name, array)
+                if EXACT:
+                    assert np.array_equal(getattr(mine, array), getattr(theirs, array)), (name, array)
+                assert fingerprint.values_close(getattr(mine, array), getattr(theirs, array)), (name, array, TIER)
             assert mine.joint_names == theirs.joint_names, name
 
 
+def v6_digests() -> set[str]:
+    """Every v6 digest above: each has a stored fingerprint (tests/test_v6_fingerprint.py)."""
+    return {V6["pendulum"], *V6["pendulum_segments"], V6["fivebar"], V6["ur5e"], V6["week"], *V6["tapes"].values(),
+            *V6_KINDS.values()}
+
+
+def v6_cases():
+    """(label, v6 digest, trajectory), one at a time: every trajectory the tests above hold to v6, built as they build it.
+    ``python tests/_v6_fingerprint.py --write`` takes the fingerprints from these (refusing unless each is v6 bit for bit);
+    ``--check`` measures each against them."""
+    session = scenario.pendulum()
+    yield "pendulum session", V6["pendulum"], session
+    for index, (segment, expected) in enumerate(zip(split(session), V6["pendulum_segments"], strict=True)):
+        yield f"pendulum segment {index}", expected, segment
+    yield "the pendulum session rebuilt from its recipe", V6["pendulum"], rebuild(recipe(session))
+    yield "five-bar session", V6["fivebar"], scenario.fivebar()
+    yield "UR5e session", V6["ur5e"], scenario.ur5e()
+    limits, _ = this_week.read_limits(EXAMPLE)
+    week = this_week.week(limits, "can11")
+    yield "the week, joined", V6["week"], week
+    names = [this_week.tape_name(index, label) for index, label in enumerate(labels(week), start=1)]
+    for name, segment in zip(names, split(week), strict=True):
+        yield name, V6["tapes"].get(name, f"no v6 tape named {name}"), segment
+        yield f"{name} rebuilt from its own recipe", V6["tapes"].get(name, f"no v6 tape named {name}"), rebuild(segment)
+    yield "chain(*split(week)) is the week", V6["week"], chain(*split(week))
+    for key, expected in V6_KINDS.items():
+        yield key, expected, _ported(*key.split("/"))
+
+
 if __name__ == "__main__":
-    raise SystemExit(_runner.run(globals(), "test_equivalence (v6, bit for bit)"))
+    raise SystemExit(_runner.run(globals(), f"test_equivalence (v6; {TIER})"))
