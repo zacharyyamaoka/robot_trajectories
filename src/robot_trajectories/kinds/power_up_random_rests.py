@@ -5,7 +5,7 @@ import numpy as np
 from .. import kernels as k
 from ..registry import LIMITS, kind
 from ..segments import Motion
-from ..time_law import TimeLaw
+from ..time_parameterization import TimeParameterization
 from . import _lane_b as b
 
 STRATA = (("singular", 0.35), ("flipped", 0.25), ("free", 0.40))  # WHY oversampled: where a hand or a fall can leave an arm is not uniform
@@ -26,7 +26,8 @@ def _conditioning(space, q: np.ndarray) -> float:
 @kind(use_cases=("homing", "smoke_test"), needs=(*LIMITS, "forward_kinematics"), unchecked=("collision_model",),
       catalog_id="power_up_random_rests")
 def power_up_random_rests(space, *, power_ups=320, seed=20261110, strata=("singular", "flipped", "free"), dwell_s=0.5,
-                          time_law=TimeLaw.minimum_jerk(peak_speed_fraction=0.5), label="random rests", start=None):
+                          time_parameterization=TimeParameterization.minimum_jerk(peak_speed_fraction=0.5), label="random rests",
+                          start=None):
     """A pose set of ``power_ups`` seeded rests, each a station to dwell at: configurations where a hand or a fall can leave the
     arm, with the awkward ones oversampled (singular 35 %, flipped 25 %, free 40 %), for a power-up or recovery path to be run
     from each.
@@ -80,7 +81,7 @@ def power_up_random_rests(space, *, power_ups=320, seed=20261110, strata=("singu
         ordered.append(rests[pick])
         here = rests[pick][0]
     stations = [q for q, _ in ordered]
-    pieces = b.station_pieces(space, start, stations, time_law, label=label,
+    pieces = b.station_pieces(space, start, stations, time_parameterization, label=label,
                               dwell=lambda index, q: k.hold(q, dwell_s, space.rate_hz, label=f"{label}: station {index}"))
     entry = {**b.stations_entry(stations), "strata": [name for _, name in ordered]}
     return Motion(pieces, [f"{power_ups} rests: " + ", ".join(f"{int(c)} {n}" for n, c in zip(strata, counts, strict=True))], entry)

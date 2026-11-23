@@ -6,7 +6,7 @@ import numpy as np
 
 from ..cartesian import Unreachable
 from ..registry import LIMITS, kind
-from ..time_law import TimeLaw
+from ..time_parameterization import TimeParameterization
 from ._lane_d import pose_of, pose_set, rotation_about, rotation_between, try_solve, unit
 
 GOLDEN_ANGLE = math.pi * (3.0 - math.sqrt(5.0))
@@ -15,7 +15,8 @@ GOLDEN_ANGLE = math.pi * (3.0 - math.sqrt(5.0))
 @kind(use_cases=("camera_calibration",), needs=(*LIMITS, "forward_kinematics", "inverse_kinematics"),
       unchecked=("collision_model", "reach_map"), catalog_id="camera_board_views")
 def camera_board_views(space, *, views=20, max_tilt_rad=0.785, image_cells=9, standoff_m=0.3, half_field_rad=0.35, focus_m=None,
-                       dwell_s=1.0, time_law=TimeLaw.minimum_jerk(peak_speed_fraction=0.5), label="board views", start=None):
+                       dwell_s=1.0, time_parameterization=TimeParameterization.minimum_jerk(peak_speed_fraction=0.5),
+                       label="board views", start=None):
     """Tool poses that show one flat target (a printed board, at ``focus_m``) to a camera on the tool at many tilts and positions
     across the image: Zhang's views for intrinsics and distortion (a pose set: ``views`` stations, ``"<label>: station k"``).
 
@@ -67,6 +68,6 @@ def camera_board_views(space, *, views=20, max_tilt_rad=0.785, image_cells=9, st
         raise Unreachable(label, index=len(poses), count=views, point=focus,
                           why=f"only {len(poses)} of the {views} views have a usable inverse-kinematics answer among {6 * views} candidates")
     notes = [f"{skipped} candidate views skipped (no usable inverse-kinematics answer)"] if skipped else []
-    return pose_set(space, label, start, solutions, points=[pose[:3, 3] for pose in poses], dwell_s=dwell_s, time_law=time_law, room=room,
-                    via=start, notes=notes,
+    return pose_set(space, label, start, solutions, points=[pose[:3, 3] for pose in poses], dwell_s=dwell_s,
+                    time_parameterization=time_parameterization, room=room, via=start, notes=notes,
                     entry={"focus_m": [float(v) for v in focus], "image_cells": int(image_cells), "max_tilt_rad": float(max_tilt_rad)})

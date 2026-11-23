@@ -9,7 +9,7 @@ the catalog page's hero video and a GIF of it, and the page and card stills. Eve
   output printed under it;
 - the counts, the locked dimensions and the coverage come from the catalog page's build (bam_ws
   ``docs/trajectory_generator/catalog/at_a_glance/build_kind_previews.py``: ``catalog-kinds/build.json`` and ``data.js``);
-- the plugin table asks each plugin's own venv which time law it registers and which library version serves it.
+- the plugin table asks each plugin's own venv which time parameterization it registers and which library version serves it.
 
 Stdlib only (the package's venv runs it; ffmpeg makes the GIF). Offline: no network, media by relative path.
 """
@@ -100,14 +100,14 @@ def quick_start(python: Path, snapshot: Path) -> tuple[str, str]:
 
 
 def plugin_rows(snapshot: Path) -> list[dict]:
-    """Each plugin's venv: which provider serves its time law, the library version, load errors (asked, not assumed)."""
+    """Each plugin's venv: who serves its time parameterization, the library version, load errors (asked, not assumed)."""
     rows = []
     for folder, title, registers, library, what, rule in PLUGINS:
         python = ROOT / "plugins" / folder / ".venv" / "bin" / "python"
         probe = (f"import sys, json; sys.path[:0] = [{str(snapshot / 'src')!r}, {str(snapshot / 'plugins' / folder / 'src')!r}]\n"
                  "import importlib.metadata as md, robot_trajectories as rt\n"
                  "from robot_trajectories import plugins\n"
-                 f"laws = rt.time_laws().get({registers!r}, ())\n"
+                 f"laws = rt.time_parameterizations().get({registers!r}, ())\n"
                  "version = None\n"
                  "for dist in ('ruckig-pro', 'ruckig', 'toppra'):\n"
                  "    try: version = version or (dist + ' ' + md.version(dist))\n"
@@ -222,7 +222,7 @@ def plugin_table(rows: list[dict], kinds: list[dict]) -> str:
         body.append(f"<tr><td><b>{esc(row['title'])}</b><div class=why><code>plugins/{esc(row['folder'])}</code></div></td><td><code>{esc(row['registers'])}</code></td>"
                     f"<td>{esc(row['what'])}<div class=why>Rule: {esc(row['rule'])}</div></td><td>{kinds_served}</td>"
                     f"<td>{esc(row['status'])}<div class=why>{esc(row['version'])}</div></td></tr>")
-    return ("<table class=grid><thead><tr><th>Plugin</th><th>Time law</th><th>What it does</th><th>Kinds it serves</th><th>In its own venv, at build time</th></tr></thead>"
+    return ("<table class=grid><thead><tr><th>Plugin</th><th>Time parameterization</th><th>What it does</th><th>Kinds it serves</th><th>In its own venv, at build time</th></tr></thead>"
             "<tbody>" + "".join(body) + "</tbody></table>")
 
 
@@ -336,9 +336,9 @@ it (joint and torque kinds: joints moving at once) or, for a Cartesian kind, on 
 ones that cannot trace it refuse.</p>
 {family_table(kinds)}
 
-<h2>Plugins: kinds and time laws from other packages</h2>
-<p>Simple kinds live in the package (numpy + robot_msgs). A time law that needs another library is a plugin, found by entry point
-(<code>robot_trajectories.time_laws</code>). Two providers of one name are refused, never ranked. The catalog's two plugin-served kinds are filtered by
+<h2>Plugins: kinds and time parameterizations from other packages</h2>
+<p>Simple kinds live in the package (numpy + robot_msgs). A time parameterization that needs another library is a plugin, found by entry point
+(<code>robot_trajectories.time_parameterizations</code>). Two providers of one name are refused, never ranked. The catalog's two plugin-served kinds are filtered by
 <b>Built → Needs a plugin</b> on the page; their previews were generated in the plugin's own venv.</p>
 {plugin_table(plugins, kinds)}
 

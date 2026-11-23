@@ -6,7 +6,7 @@ trajectories". So nothing here knows a robot: the space's ``forward`` / ``invers
 
 - ``follow(space, start, path, law, ...)``: the tool along a geometric path (a function of progress s in [0, 1] returning
   4x4 poses), inverse kinematics at every step, as MoveIt's ``computeCartesianPath`` does (an end-effector step plus a jump
-  threshold), then timed by a TimeLaw over the joint path. Refused, never clipped, at the first sample that fails, saying
+  threshold), then timed by a TimeParameterization over the joint path. Refused, never clipped, at the first sample that fails, saying
   which sample, where the tool was and why.
 - ``line(a, b)``: the straight path between two poses (position linear, orientation slerped).
 - ``solve_points(space, start, poses, ...)``: inverse kinematics at a few points only, each seeded from the last.
@@ -28,7 +28,7 @@ from robot_msgs.geometry.rotations import quat_from_matrix, quat_slerp, quat_to_
 
 from .segments import TOOL_TARGET, Piece
 from .space import JointSpace
-from .time_law import TimeLaw
+from .time_parameterization import TimeParameterization
 
 ORIENTATIONS = ("hold", "follow")
 Path = Callable[[np.ndarray], np.ndarray]  # progress s (M,) in [0, 1] -> poses (M, 4, 4)
@@ -125,7 +125,7 @@ def solve_points(space: JointSpace, start: np.ndarray, poses: Sequence[np.ndarra
     return solutions
 
 
-def follow(space: JointSpace, start: np.ndarray, path: Path, law: TimeLaw, *, length_m: float, label: str,
+def follow(space: JointSpace, start: np.ndarray, path: Path, law: TimeParameterization, *, length_m: float, label: str,
            eef_step_m: float = 0.001, jump_threshold: float = 10.0, max_joint_step_rad: float = 0.1,
            tolerance_m: float = 1e-4, tolerance_rad: float = 1e-3) -> Piece:
     """The tool along ``path`` (progress -> 4x4 poses) from the configuration ``start``, timed by ``law``, at rest at both ends.
@@ -163,7 +163,7 @@ def follow(space: JointSpace, start: np.ndarray, path: Path, law: TimeLaw, *, le
         index = int(np.argmax(steps > jump_threshold * mean)) + 1
         raise Unreachable(label, index=index, count=count, point=targets[index][:3, 3],
                           why=f"a joint-space jump {steps[index - 1] / mean:.1f}x the mean step (jump_threshold {jump_threshold:g})")
-    # WHY the space's dynamics handed on: a time law whose backend needs them (TOPP-RA's torque mode) bounds torque along the path
+    # WHY the space's dynamics handed on: a time parameterization whose backend needs them (TOPP-RA's torque mode) bounds torque along the path
     timed = law.along(q, space.limits, space.rate_hz, label=label, progress_grid=grid, dynamics=space.dynamics)
     arrays = timed.arrays
     if timed.progress is not None:

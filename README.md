@@ -102,14 +102,18 @@ five-bar).
 ## Multi-waypoint trajectories
 
 ```python
-joint_waypoints(space, [[0.2, -1.4, 1.2, -1.4, -1.6, 0.0], [...]], time_law=TimeLaw.trapezoid(peak_speed_fraction=0.8))
+joint_waypoints(space, [[0.2, -1.4, 1.2, -1.4, -1.6, 0.0], [...]],
+                time_parameterization=TimeParameterization.trapezoid(peak_speed_fraction=0.8))
 move(space, joint="can11", targets_fraction=(0.5, -0.5))    # waypoints as fractions of the room around the start
 cartesian_waypoints(space, [p1, p2, p3], dwell_s=0.3)        # tool points
 ```
 
-A path kind takes a `TimeLaw`: `TimeLaw.minimum_jerk(peak_speed_fraction=0.6)` or `move_s=`, `TimeLaw.trapezoid(...)`, or a
-plugin's (`TimeLaw("ruckig", ...)`). A leg may start or end moving (`start_state=`, `end_state=`: the quintic through both
-states), which is what a velocity-matched sync needs.
+Trajectory generation here is a path and its timing: a path kind takes a `TimeParameterization` (MoveIt's name for the role:
+a path and limits in, a timed trajectory out): `TimeParameterization.minimum_jerk(peak_speed_fraction=0.6)` or `move_s=`,
+`TimeParameterization.trapezoid(...)`, or a plugin's (`TimeParameterization("ruckig", ...)`). A leg may start or end moving
+(`start_state=`, `end_state=`: the quintic through both states), which is what a velocity-matched sync needs.
+
+`TimeParameterization`: formerly TimeLaw; the old names still import (and `time_law=` still works; recipes keep `"time_law"`).
 
 ## Segments and recipes
 
@@ -148,7 +152,7 @@ def sine_dwell(space, joint=None, *, frequency_hz=1.0, duration_s=10.0, fade_s=1
 The decorator refuses what the space lacks, guards the output (limits, jumps, rest, collisions), and records the call. The
 contract is PEP 0002 §4; `tests/kind_contract.py`'s `check_kind(trajectory, space)` holds a new kind to it.
 
-## Plugins: kinds and time laws from other packages
+## Plugins: kinds and time parameterizations from other packages
 
 Simple kinds live here; anything that needs another library (Ruckig, TOPP-RA, a robot's own stack) is a separate package that
 registers by entry point, cut by role:
@@ -157,14 +161,15 @@ registers by entry point, cut by role:
 [project.entry-points."robot_trajectories.kinds"]
 my_kinds = "my_package.kinds"
 
-[project.entry-points."robot_trajectories.time_laws"]
+[project.entry-points."robot_trajectories.time_parameterizations"]
 ruckig = "robot_trajectories_ruckig:RuckigBackend"
 ```
 
-A plugin kind is listed, tagged and guarded like a built-in one; a time law serves `TimeLaw(name, ...)`. Two providers of one
-time law are refused (Ruckig Pro is a drop-in for `ruckig`, never installed beside Community), and a Ruckig backend never hands
-intermediate waypoints to Community (it sends them to Ruckig's cloud). `robot_trajectories.planners` and `.optimizers` are
-reserved for the later roles.
+A plugin kind is listed, tagged and guarded like a built-in one; a time parameterization backend serves
+`TimeParameterization(name, ...)`. The group's old name, `robot_trajectories.time_laws`, is still read (a name declared in
+both is the new group's). Two providers of one time parameterization are refused (Ruckig Pro is a drop-in for `ruckig`, never
+installed beside Community), and a Ruckig backend never hands intermediate waypoints to Community (it sends them to Ruckig's
+cloud). `robot_trajectories.planners` and `.optimizers` are reserved for the later roles.
 
 ## Moving targets
 
@@ -202,7 +207,8 @@ v6's motion, bit for bit:
 /home/bam/robot_trajectories/.venv/bin/python /home/bam/robot_trajectories/tests/test_equivalence.py
 ```
 
-The kind contract (decorator, guard, recipe, segments, moving boundaries, time-law seam, injected slots, moving targets):
+The kind contract (decorator, guard, recipe, segments, moving boundaries, time-parameterization seam, injected slots, moving
+targets):
 
 ```bash
 /home/bam/robot_trajectories/.venv/bin/python /home/bam/robot_trajectories/tests/test_contract.py
@@ -218,6 +224,12 @@ Plugins by entry point:
 
 ```bash
 /home/bam/robot_trajectories/.venv/bin/python /home/bam/robot_trajectories/tests/test_plugins.py
+```
+
+The rename of 2026-11-23 (the old `TimeLaw` names, the `time_law=` keyword and the old entry-point group still work):
+
+```bash
+/home/bam/robot_trajectories/.venv/bin/python /home/bam/robot_trajectories/tests/test_time_parameterization_names.py
 ```
 
 v6's claims, carried over:

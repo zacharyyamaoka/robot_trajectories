@@ -5,7 +5,7 @@ import math
 import numpy as np
 
 from ..registry import LIMITS, kind
-from ..time_law import TimeLaw
+from ..time_parameterization import TimeParameterization
 from ._lane_d import forward_or_none, line_clear, nearest_order, pose_set, usable
 
 CRITERIA = ("observability_index", "noise_amplification", "min_singular_value", "condition_number")
@@ -77,8 +77,8 @@ def _information_gain(jacobians: np.ndarray, inverse: np.ndarray) -> np.ndarray:
 @kind(use_cases=("kinematic_calibration", "accuracy"), needs=(*LIMITS, "forward_kinematics"), unchecked=("collision_model",),
       catalog_id="kinematic_calibration_pose_set")
 def kinematic_calibration_pose_set(space, *, poses=30, candidates=2000, criterion="observability_index", dwell_s=1.0,
-                                   time_law=TimeLaw.minimum_jerk(peak_speed_fraction=0.5), seed=0, label="calibration poses",
-                                   start=None):
+                                   time_parameterization=TimeParameterization.minimum_jerk(peak_speed_fraction=0.5), seed=0,
+                                   label="calibration poses", start=None):
     """Static poses chosen to make the calibration's identification Jacobian well conditioned, each held ``dwell_s`` for an
     external measurement (a pose set: stations joined by legs, labelled ``"<label>: station k"``).
 
@@ -151,6 +151,7 @@ def kinematic_calibration_pose_set(space, *, poses=30, candidates=2000, criterio
     points = [space.forward(q)[:3, 3] for q in stations]
     notes = [f"{criterion} of the chosen {poses} poses {best:.4g}; the median of 20 random sets of {poses}: {baseline:.4g}",
              f"{width} observable parameters of {jacobians.shape[-1]} (joint zero offsets and a tool translation)"]
-    return pose_set(space, label, start, stations, points=points, dwell_s=dwell_s, time_law=time_law, room=room, via=start, notes=notes,
+    return pose_set(space, label, start, stations, points=points, dwell_s=dwell_s, time_parameterization=time_parameterization,
+                    room=room, via=start, notes=notes,
                     entry={"criterion": criterion, "index": best, "index_of_random_sets_median": baseline,
                            "observable_parameters": int(width), "candidates_used": int(count)})

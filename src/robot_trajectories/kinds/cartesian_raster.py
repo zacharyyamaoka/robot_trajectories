@@ -67,7 +67,7 @@ def cartesian_raster(space, region_m=None, *, cell_m=0.02, tool_speeds_m_s=(0.05
     the last ended). Each line is a rest-to-rest trapezoid on the tool's path length, ``ramp_time_s`` up and down, lengthened where
     a joint limit binds (the notes give the speed reached).
 
-    WHY no jerk time: the built-in time laws have no jerk-limited trapezoid; that profile is the ruckig plugin's (lane E)."""
+    WHY no jerk time: the built-in time parameterizations have no jerk-limited trapezoid; that profile is the ruckig plugin's (lane E)."""
     if cell_m <= 0 or ramp_time_s <= 0 or not tool_speeds_m_s or any(v <= 0 for v in tool_speeds_m_s):
         raise ValueError("cartesian_raster needs cell_m, ramp_time_s and every tool speed positive")
     here = space.forward(start)

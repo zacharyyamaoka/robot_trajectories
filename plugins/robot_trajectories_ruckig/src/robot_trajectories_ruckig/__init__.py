@@ -1,13 +1,15 @@
-"""Ruckig Community as a robot_trajectories time law: ``TimeLaw("ruckig", ...)`` times one leg as a jerk-limited S-curve.
+"""Ruckig Community as a robot_trajectories time parameterization: ``TimeParameterization("ruckig", ...)`` times one leg as a
+jerk-limited S-curve.
 
-    law = TimeLaw("ruckig", peak_speed_fraction=0.8, options={"jerk_fraction": 0.5, "synchronization": "phase"})
-    joint_waypoints(space, waypoints, time_law=law)          # every leg rest-to-rest, an S-curve each
+    law = TimeParameterization("ruckig", peak_speed_fraction=0.8, options={"jerk_fraction": 0.5, "synchronization": "phase"})
+    joint_waypoints(space, waypoints, time_parameterization=law)   # every leg rest-to-rest, an S-curve each
     law.leg(q0, q1, space.limits, space.rate_hz, end_state=BoundaryState(velocity, acceleration))   # a leg that ends moving
 
-Registered through the entry point ``robot_trajectories.time_laws`` (``ruckig = "robot_trajectories_ruckig:RuckigBackend"``);
-robot_trajectories never imports it (its leaf rule). Zach, 2026-11-18: "for simple things you keep the implementation
-yourself but the other things other repos can implement them... like ruckig (and if you have the professional version we
-can support that as a drop-in backend as well)". This is the Community half; ``robot-trajectories-ruckig-pro`` is the drop-in.
+Registered through the entry point ``robot_trajectories.time_parameterizations``
+(``ruckig = "robot_trajectories_ruckig:RuckigBackend"``); robot_trajectories never imports it (its leaf rule). Zach,
+2026-11-18: "for simple things you keep the implementation yourself but the other things other repos can implement them...
+like ruckig (and if you have the professional version we can support that as a drop-in backend as well)". This is the
+Community half; ``robot-trajectories-ruckig-pro`` is the drop-in.
 
 What it serves:
 - **one leg** (a path of two points) from any start state to any end state (position, velocity, acceleration), time-optimal
@@ -61,8 +63,8 @@ def waypoint_refusal(count: int) -> str:
     """Why Community never times a path of ``count`` > 2 points, naming the drop-in that does."""
     return (f"Ruckig Community times one leg (two path points), not a path of {count}: Community sends intermediate "
             f"waypoints to Ruckig's cloud servers, so they are never handed to it. Install {PRO_PACKAGE} (the local Ruckig Pro "
-            f"build, a drop-in for the time law 'ruckig') instead of this package for waypoints, or time each leg on its own "
-            f"(joint_waypoints / legs_through stop at every point)")
+            f"build, a drop-in for the time parameterization 'ruckig') instead of this package for waypoints, or time each leg "
+            f"on its own (joint_waypoints / legs_through stop at every point)")
 
 
 def _refuse_beside_pro() -> None:
@@ -76,7 +78,7 @@ def _refuse_beside_pro() -> None:
 
 
 class RuckigBackend:
-    """The time law ``ruckig`` on Ruckig Community: one state-to-state leg, never intermediate waypoints."""
+    """The time parameterization ``ruckig`` on Ruckig Community: one state-to-state leg, never intermediate waypoints."""
 
     name = NAME
     edition = EDITION
@@ -123,28 +125,29 @@ def settings(limits: JointLimits, law: Any) -> dict[str, Any]:
     options = dict(law.options) if law is not None else {}
     unknown = sorted(set(options) - set(OPTIONS))
     if unknown:
-        raise ValueError(f"time law 'ruckig' has no option {unknown} (it takes {OPTIONS})")
+        raise ValueError(f"time parameterization 'ruckig' has no option {unknown} (it takes {OPTIONS})")
     dof = len(limits.joint_names)
     fractions = {}
     for key in ("acceleration_fraction", "jerk_fraction"):
         value = float(options.get(key, 1.0))
         if not 0.0 < value <= 1.0:
-            raise ValueError(f"time law 'ruckig': {key} must lie in (0, 1], got {value}")
+            raise ValueError(f"time parameterization 'ruckig': {key} must lie in (0, 1], got {value}")
         fractions[key] = value
     sync = options.get("synchronization", "phase")
     if sync not in SYNCHRONIZATION:
-        raise ValueError(f"time law 'ruckig': synchronization must be one of {tuple(SYNCHRONIZATION)}, got {sync!r}")
+        raise ValueError(f"time parameterization 'ruckig': synchronization must be one of {tuple(SYNCHRONIZATION)}, got {sync!r}")
     velocity = _finite_positive(limits.max_velocity, dof)
     acceleration = _finite_positive(limits.max_acceleration, dof)
     if velocity is None or acceleration is None:
-        raise ValueError("time law 'ruckig' needs finite, positive max_velocity and max_acceleration in the JointLimits")
+        raise ValueError("time parameterization 'ruckig' needs finite, positive max_velocity and max_acceleration in the "
+                         "JointLimits")
     jerk = _finite_positive(limits.max_jerk, dof)
     if jerk is None and "max_jerk" in options:
         jerk = _finite_positive(np.broadcast_to(np.asarray(options["max_jerk"], float), (dof,)), dof)
     if jerk is None:
         # WHY refused, never defaulted: a jerk-limited S-curve is defined by its jerk limit, and the drives' value is not ours to guess
         raise ValueError("a jerk-limited S-curve needs a jerk limit: state max_jerk in the JointLimits (the space's jerk_limits "
-                         "rung) or TimeLaw('ruckig', ..., options={'max_jerk': ...}) in rad/s^3")
+                         "rung) or TimeParameterization('ruckig', ..., options={'max_jerk': ...}) in rad/s^3")
     return {"max_velocity": velocity, "max_acceleration": acceleration * fractions["acceleration_fraction"],
             "max_jerk": jerk * fractions["jerk_fraction"], "synchronization": SYNCHRONIZATION[sync]}
 

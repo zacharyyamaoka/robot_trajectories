@@ -20,6 +20,8 @@ body is only its motion:
    it) or ``ends="anywhere"`` (event-ended), and free of collision when the space has a collision model.
 5. **Records the call** in ``header.meta["recipe"]``: the name, every argument with defaults written out (a moving target by
    its data form: a ``LinearMotion`` or a ``PoseTrajectory``, never a callable), the space's fingerprint. A higher-order kind's recipe is its own one call; its segments keep the calls that make each alone.
+   A renamed parameter keeps its old key there (``time_parameterization`` is written ``"time_law"``: ``RECORDED_AS``), and
+   its old keyword is still accepted.
 
 Kinds are found by importing ``kinds/*.py`` (one file per kind) and every module an installed package names in the
 entry-point group ``robot_trajectories.kinds`` (``plugins.py``). Both register the same way, and are listed the same way.
@@ -46,7 +48,7 @@ from . import kernels as k
 from .moving import LinearMotion, has_data_form, is_target_record, target_from_record, target_record
 from .segments import RECIPE_FORMAT, TRANSITION_SPEED, Motion, Piece, _Block, assemble, guard, segment_info, with_segments
 from .space import JointSpace, MissingRung, State, Status
-from .time_law import TimeLaw
+from .time_parameterization import RENAMED_KEYWORDS, TimeParameterization, renamed_keywords
 from .trajectory_catalog.kind import (DIMENSIONS, ENTRY_LEVEL_OF_NEED, ENTRY_LEVELS, FAMILIES, NEEDS, STARTS_AS,
                                       USE_CASE_TAGS)
 
@@ -54,6 +56,10 @@ LIMITS = ("joint_limits", "velocity_limits", "acceleration_limits")
 STARTS = ("at_rest", "moving")
 ENDS = ("at_rest", "moving", "anywhere")
 COMMANDS = ("position", "effort")
+# WHY a renamed parameter keeps its old key in the recipe (the rename of 2026-11-23, time_law -> time_parameterization): the
+# recipe is a file format. arm_motion_bench's frozen datasets hold recipes written with "time_law" / "approach_time_law"; a
+# recipe written now reads the same, so those still rebuild, compare equal, and an older robot_trajectories rebuilds new ones
+RECORDED_AS = {new: old for old, new in RENAMED_KEYWORDS.items()}
 
 
 @dataclass(frozen=True)
@@ -99,8 +105,9 @@ class KindInfo:
         defaults, the required ones always. ``brief``: for a person, not for eval (a pose as its point in mm, floats to 4 digits)."""
         shown = []
         for name, default in self.parameters.items():
-            if params is not None and name in params:
-                value = _decode(params[name])
+            recorded = RECORDED_AS.get(name, name)  # a recipe's call keeps a renamed parameter under its old key
+            if params is not None and (name in params or recorded in params):
+                value = _decode(params[name] if name in params else params[recorded])
             elif default is inspect.Parameter.empty:
                 shown.append(f"{name}=...")
                 continue
@@ -186,6 +193,9 @@ def kind(*, use_cases: Sequence[str], needs: Sequence[str] = LIMITS, better_with
             for other in _REGISTRY.values():
                 if other.catalog_id == catalog_id and other.name != name:
                     raise TypeError(f"{name} and {other.name} both claim catalog row {catalog_id!r}")
+        both = [old for old, new in RENAMED_KEYWORDS.items() if old in signature.parameters and new in signature.parameters]
+        if both:
+            raise TypeError(f"kind {name}: takes {both} beside their new names; a recipe records both under one key")
         has_label = "label" in signature.parameters
 
         @functools.wraps(body)
@@ -201,7 +211,7 @@ def kind(*, use_cases: Sequence[str], needs: Sequence[str] = LIMITS, better_with
                     raise MissingRung(name, need)
             params = {key: _normalize(name, key, value) for key, value in bound.arguments.items() if key != "space"}
             start = space.state_at(params["start"]) if info.starts == "moving" else space.start_at(params["start"])
-            call = {"kind": name, **{key: _encode(key, value) for key, value in params.items()}}
+            call = {"kind": name, **{RECORDED_AS.get(key, key): _encode(key, value) for key, value in params.items()}}
             if info.starts == "moving":
                 call["start"] = start.to_config()  # WHY the whole state: a moving start is not rebuilt from a position
             label = (params.get("label") if has_label else "") or name.replace("_", " ")
@@ -213,6 +223,9 @@ def kind(*, use_cases: Sequence[str], needs: Sequence[str] = LIMITS, better_with
                 return _composed(info, space, result, call, here, notes)
             return _primitive(info, space, result, call, here, label, notes)
 
+        renamed = {old: new for old, new in RENAMED_KEYWORDS.items() if new in signature.parameters}
+        if renamed:  # the old keyword still works, from a caller or from a recipe's call (rebuild hands it the recorded key)
+            generate = renamed_keywords(**renamed)(generate)
         generate.kind = name  # type: ignore[attr-defined]
         _REGISTRY[name] = KindInfo(name, generate, tuple(use_cases), tuple(needs), better_with, tuple(unchecked), catalog_id,
                                    family, starts_as, dimensions, starts, ends, command, higher_order, until, body.__module__,
@@ -287,7 +300,7 @@ def _composed(info: KindInfo, space: JointSpace, result: JointTrajectory, call: 
 
 
 def _normalize(kind_name: str, key: str, value: Any) -> Any:
-    """A parameter as a kind's body reads it: tuples for sequences, Python numbers, a TimeLaw for a time-law dict."""
+    """A parameter as a kind's body reads it: tuples for sequences, Python numbers, a TimeParameterization for its dict."""
     if key == "start":
         if value is None or isinstance(value, (JointTrajectory, Mapping)) or type(value).__name__ == "State":
             return value
@@ -302,7 +315,7 @@ def _normalize(kind_name: str, key: str, value: Any) -> Any:
 
 def _decode(value: Any) -> Any:
     if isinstance(value, Mapping) and "time_law" in value:
-        return TimeLaw.from_config(value)
+        return TimeParameterization.from_config(value)
     if is_target_record(value):
         return target_from_record(value)  # WHY the object, not the mapping: the body is handed what the first call was handed
     if isinstance(value, (list, tuple, np.ndarray)):
@@ -322,7 +335,7 @@ def _encode(key: str, value: Any) -> Any:
         return [float(item) for item in value.positions[-1]]
     if isinstance(value, State):
         return value.to_config()
-    if isinstance(value, TimeLaw):
+    if isinstance(value, TimeParameterization):
         return value.to_config()
     if has_data_form(value):
         return target_record(value)  # a LinearMotion or a PoseTrajectory, tagged "moving_target" (moving.py)
@@ -339,8 +352,8 @@ def _encode(key: str, value: Any) -> Any:
         raise TypeError(f"parameter {key}={value!r} cannot be written as text: a function of time has no data form. A moving "
                         "target is recorded as a LinearMotion (constant velocity; LinearMotion.from_sync(pose, sync_dir, "
                         "sync_speed)) or a robot_msgs PoseTrajectory (sampled poses): pass one of those")
-    raise TypeError(f"parameter {key}={value!r} cannot be written as text: pass numbers, names, lists, a TimeLaw, or a LinearMotion "
-                    "or PoseTrajectory as a moving target")
+    raise TypeError(f"parameter {key}={value!r} cannot be written as text: pass numbers, names, lists, a TimeParameterization, "
+                    "or a LinearMotion or PoseTrajectory as a moving target")
 
 
 def _brief(value: Any) -> str:

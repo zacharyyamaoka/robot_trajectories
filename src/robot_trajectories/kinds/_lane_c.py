@@ -3,7 +3,7 @@
 - the geometry of a circular arc (Pilz CIRC: by an interim point or by a centre) as a path ``s -> pose`` for ``cartesian.follow``;
 - low-discrepancy and stratified sequences in numpy only (Sobol with Joe-Kuo direction numbers, Halton, Latin hypercube);
 - the ZV / ZVD input shapers (Singer and Seering) and a shaped leg;
-- a time law that holds a tool speed (a trapezoid on the tool's own path length);
+- a time parameterization that holds a tool speed (a trapezoid on the tool's own path length);
 - the blended and spline joint paths of ``via_point_spline``;
 - a faded sine (the tapered swing of the five-bar's coverage set).
 """
@@ -17,7 +17,7 @@ from robot_msgs.geometry.rotations import quat_from_matrix, quat_slerp, quat_to_
 
 from .. import kernels as k
 from ..cartesian import Path, follow, line, rotation_angle
-from ..time_law import TimeLaw
+from ..time_parameterization import TimeParameterization
 
 # ====================================================================== points and poses
 
@@ -38,8 +38,8 @@ def with_point(rotation: np.ndarray, point: np.ndarray) -> np.ndarray:
     return pose
 
 
-def tool_line(space, q: np.ndarray, target: np.ndarray, law: TimeLaw, *, label: str, eef_step_m: float, jump_threshold: float,
-              max_joint_step_rad: float, tolerance_m: float):
+def tool_line(space, q: np.ndarray, target: np.ndarray, law: TimeParameterization, *, label: str, eef_step_m: float,
+              jump_threshold: float, max_joint_step_rad: float, tolerance_m: float):
     """One straight tool line from where the tool is at ``q`` to the pose ``target``, rest to rest (``cartesian.follow``)."""
     here = space.forward(q)
     length = float(np.linalg.norm(target[:3, 3] - here[:3, 3]))
@@ -49,7 +49,7 @@ def tool_line(space, q: np.ndarray, target: np.ndarray, law: TimeLaw, *, label: 
                   jump_threshold=jump_threshold, max_joint_step_rad=max_joint_step_rad, tolerance_m=tolerance_m)
 
 
-def tool_speed_law(length_m: float, speed_m_s: float, ramp_time_s: float, *, min_move_s: float = 0.1) -> TimeLaw:
+def tool_speed_law(length_m: float, speed_m_s: float, ramp_time_s: float, *, min_move_s: float = 0.1) -> TimeParameterization:
     """A trapezoid on the tool's path length: ramp ``ramp_time_s`` up, cruise at ``speed_m_s``, ramp down (a triangle peaking at the
     speed when the line is too short to cruise).
 
@@ -61,7 +61,7 @@ def tool_speed_law(length_m: float, speed_m_s: float, ramp_time_s: float, *, min
     fraction = ramp_time_s / duration
     if fraction > 0.5:
         duration, fraction = 2.0 * length_m / speed_m_s, 0.5
-    return TimeLaw.trapezoid(move_s=duration, ramp_fraction=max(fraction, 1e-3), min_move_s=min_move_s)
+    return TimeParameterization.trapezoid(move_s=duration, ramp_fraction=max(fraction, 1e-3), min_move_s=min_move_s)
 
 
 def peak_tool_speed(tool_target: np.ndarray, t: np.ndarray) -> float:
@@ -238,8 +238,8 @@ def shaper_impulses(shaper: str, mode_hz: float, damping_ratio: float) -> tuple[
     return np.array([0.0, half, 2.0 * half]), np.array([1.0, 2.0 * ratio, ratio**2]) / (1.0 + ratio) ** 2
 
 
-def shaped_leg(q0: np.ndarray, q1: np.ndarray, law: TimeLaw, limits, rate_hz: float, impulses: list[tuple[np.ndarray, np.ndarray]],
-               *, label: str) -> k.Arrays:
+def shaped_leg(q0: np.ndarray, q1: np.ndarray, law: TimeParameterization, limits, rate_hz: float,
+               impulses: list[tuple[np.ndarray, np.ndarray]], *, label: str) -> k.Arrays:
     """The rest-to-rest leg q0 -> q1 under a built-in ``law``, each joint convolved with its own impulse sequence: the shaped
     motion is the sum of A_i x (the leg delayed by t_i). A convex combination of one leg's shifted copies, so positions stay between
     q0 and q1 and no speed or acceleration peak exceeds the leg's."""
@@ -270,7 +270,7 @@ def shaped_leg(q0: np.ndarray, q1: np.ndarray, law: TimeLaw, limits, rate_hz: fl
 
 
 def uniform_arc(path: np.ndarray, spacing: float = 0.001, *, minimum: int = 1000, maximum: int = 12000) -> np.ndarray:
-    """``path`` (a fine polyline) resampled at equal arc-length steps (about ``spacing`` apart): the grid a time law differentiates
+    """``path`` (a fine polyline) resampled at equal arc-length steps (about ``spacing`` apart): the grid a time parameterization differentiates
     on, so its slope and curvature are clean (a uniform grid, no jump in spacing where a side meets a blend)."""
     chord = np.concatenate([[0.0], np.cumsum(np.linalg.norm(np.diff(path, axis=0), axis=1))])
     count = int(np.clip(math.ceil(chord[-1] / spacing) + 1, minimum, maximum))

@@ -1,4 +1,4 @@
 Metadata-Version: 2.1
 Name: robot-trajectories-test-plugin
 Version: 0.1.0
-Summary: A test plugin for robot_trajectories: one kind and one time law, registered through entry points.
+Summary: A test plugin for robot_trajectories: one kind and one time parameterization, registered through entry points.

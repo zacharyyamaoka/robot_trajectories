@@ -7,7 +7,7 @@ import numpy as np
 from .. import kernels as k
 from ..registry import LIMITS, kind
 from ..segments import Motion
-from ..time_law import TimeLaw
+from ..time_parameterization import TimeParameterization
 from ._lane_c import blend_polyline, natural_spline, uniform_arc
 
 INTERPOLATIONS = ("blend", "spline")
@@ -39,7 +39,8 @@ def _peak_jerk(arrays: k.Arrays, rate_hz: float) -> np.ndarray:
       better_with={"jerk_limits": "timed by the speed and acceleration limits alone: the jerk is not held to a limit"},
       unchecked=("collision_model",), catalog_id="via_point_spline")
 def via_point_spline(space, via_points=None, *, interpolation="blend", blend_radius_rad=0.1, blend_radius_m=None, stop_at=(),
-                     time_law=TimeLaw.minimum_jerk(peak_speed_fraction=0.5), dwell_s=0.0, label="via-point spline", start=None):
+                     time_parameterization=TimeParameterization.minimum_jerk(peak_speed_fraction=0.5), dwell_s=0.0,
+                     label="via-point spline", start=None):
     """One smooth motion through ``via_points`` (M x J absolute joint positions, rad) without stopping at them, at rest at the start
     and at the last one: the blended sequence of Pilz (a corner is cut, never stopped at), or a spline through the points.
 
@@ -51,7 +52,7 @@ def via_point_spline(space, via_points=None, *, interpolation="blend", blend_rad
     between them; one that leaves a joint's range is refused naming the joint).
 
     ``stop_at``: indices of via points to stop at (rest, then ``dwell_s``); the path is cut there into rest-to-rest runs. One
-    run is timed along its whole length by ``time_law``. When the space states a jerk limit the run is slowed until its peak jerk is
+    run is timed along its whole length by ``time_parameterization``. When the space states a jerk limit the run is slowed until its peak jerk is
     inside it (a trapezoid has unlimited jerk and is refused then); without one the jerk is not limited."""
     if interpolation not in INTERPOLATIONS:
         raise ValueError(f"via_point_spline.interpolation is one of {INTERPOLATIONS}, got {interpolation!r}")
@@ -86,8 +87,9 @@ def via_point_spline(space, via_points=None, *, interpolation="blend", blend_rad
     jerk_limit = None
     if space.has("jerk_limits"):
         jerk_limit = np.asarray(space.limits.max_jerk, float)
-        if time_law.shape == "trapezoid":
-            raise ValueError("a trapezoid time law has unlimited jerk but this space states a jerk limit: use TimeLaw.minimum_jerk")
+        if time_parameterization.shape == "trapezoid":
+            raise ValueError("a trapezoid time parameterization has unlimited jerk but this space states a jerk limit: use "
+                             "TimeParameterization.minimum_jerk")
     pieces: list[k.Arrays] = []
     notes: list[str] = []
     first = 0
@@ -116,10 +118,10 @@ def via_point_spline(space, via_points=None, *, interpolation="blend", blend_rad
                 radii[index] = min(wanted, 0.5 * float(np.linalg.norm(before - corner)), 0.5 * float(np.linalg.norm(after - corner)))
             path = uniform_arc(blend_polyline(run, radii))
             grid = np.linspace(0.0, 1.0, len(path))
-        law = time_law
+        law = time_parameterization
         for _ in range(20):
             timed = law.along(path, space.limits, space.rate_hz, label=name, progress_grid=grid, dynamics=space.dynamics)
-            # WHY the output is read again, the way the guard reads it (differences of the sampled velocity): a time law reads a
+            # WHY the output is read again, the way the guard reads it (differences of the sampled velocity): a time parameterization reads a
             # path's slope and curvature on its grid, and where the path turns tightly (a blend radius small against the legs)
             # that differs from the sampled motion by a few percent; the run is slowed until the sampled motion fits
             accel = float(np.max(np.abs(np.diff(timed.arrays.qd, axis=0)) * space.rate_hz / bounds.max_acceleration))
@@ -129,8 +131,9 @@ def via_point_spline(space, via_points=None, *, interpolation="blend", blend_rad
             if factor <= 1.0:
                 break
             # WHY the options carried over: a plugin law's settings (TOPP-RA's effort_fraction) must survive the slowing
-            law = TimeLaw(time_law.shape, move_s=float(timed.arrays.t[-1]) * factor * 1.01, ramp_fraction=time_law.ramp_fraction,
-                          min_move_s=time_law.min_move_s, options=time_law.options)
+            law = TimeParameterization(time_parameterization.shape, move_s=float(timed.arrays.t[-1]) * factor * 1.01,
+                                       ramp_fraction=time_parameterization.ramp_fraction,
+                                       min_move_s=time_parameterization.min_move_s, options=time_parameterization.options)
         else:
             raise ValueError("via_point_spline: no timing keeps this path inside the acceleration and jerk limits in 20 slowings")
         pieces.append(timed.arrays)

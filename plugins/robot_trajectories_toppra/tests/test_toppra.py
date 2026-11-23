@@ -1,5 +1,5 @@
-"""The ``toppra`` time law (TOPP-RA), held to robot_trajectories' TimeLawBackend contract on the pendulum, the five-bar and the
-UR5e, through its real entry point. A plain script (the arm may be powered: never pytest):
+"""The ``toppra`` time parameterization (TOPP-RA), held to robot_trajectories' TimeParameterizationBackend contract on the
+pendulum, the five-bar and the UR5e, through its real entry point. A plain script (the arm may be powered: never pytest):
 
     /home/bam/robot_trajectories/plugins/robot_trajectories_toppra/.venv/bin/python /home/bam/robot_trajectories/plugins/robot_trajectories_toppra/tests/test_toppra.py
 
@@ -29,7 +29,7 @@ import scenario  # noqa: E402
 from fixtures import robots  # noqa: E402
 from fixtures import lane_b  # noqa: E402
 from kind_contract import check_kind  # noqa: E402
-from robot_trajectories import BoundaryState, JointSpace, MissingRung, TimeLaw  # noqa: E402
+from robot_trajectories import BoundaryState, JointSpace, MissingRung, TimeParameterization  # noqa: E402
 from robot_trajectories.segments import TOOL_TARGET  # noqa: E402
 
 PROVIDER = "robot-trajectories-toppra"
@@ -87,12 +87,13 @@ def test_found_through_its_entry_point_in_a_fresh_interpreter():
         "from importlib import metadata\n"
         "import robot_trajectories as rt\n"
         "from robot_trajectories import plugins\n"
-        "points = [p for p in metadata.entry_points(group='robot_trajectories.time_laws') if p.name == 'toppra']\n"
+        "points = [p for p in metadata.entry_points(group='robot_trajectories.time_parameterizations') if p.name == 'toppra']\n"
         "assert [p.value for p in points] == ['robot_trajectories_toppra:ToppraBackend'], points\n"
-        "rt.TimeLaw('toppra', peak_speed_fraction=1.0)\n"
-        f"assert [e.provider for e in rt.time_laws()['toppra']] == [{PROVIDER!r}], rt.time_laws()['toppra']\n"
+        "rt.TimeParameterization('toppra', peak_speed_fraction=1.0)\n"
+        f"assert [e.provider for e in rt.time_parameterizations()['toppra']] == [{PROVIDER!r}], "
+        "rt.time_parameterizations()['toppra']\n"
         "assert plugins.errors() == [], plugins.errors()\n"
-        "print('found', type(rt.time_law.backend('toppra')).__name__)\n")
+        "print('found', type(rt.time_parameterization.backend('toppra')).__name__)\n")
     assert done.returncode == 0 and "found ToppraBackend" in done.stdout, done.stderr[-3000:]
 
 
@@ -100,7 +101,7 @@ def test_found_through_its_entry_point_in_a_fresh_interpreter():
 
 
 def test_straight_legs_match_the_closed_form_optimum_and_beat_minimum_jerk():
-    law = TimeLaw("toppra", peak_speed_fraction=1.0)
+    law = TimeParameterization("toppra", peak_speed_fraction=1.0)
     for space in (pendulum(), fivebar(), ur5e()):
         room, home = space.room(space.home), space.home
         half = np.minimum(home - room.low, room.high - home)
@@ -114,12 +115,12 @@ def test_straight_legs_match_the_closed_form_optimum_and_beat_minimum_jerk():
             best = max(line_optimum(q0, q1, space.limits), law.min_move_s)
             assert best - 1e-9 <= arrays.t[-1] <= best * 1.01 + 1.0 / space.rate_hz, \
                 f"{arrays.t[-1]:.4f} s against the closed-form optimum {best:.4f} s"
-            reference = TimeLaw.minimum_jerk(peak_speed_fraction=1.0).leg(q0, q1, space.limits, space.rate_hz)
+            reference = TimeParameterization.minimum_jerk(peak_speed_fraction=1.0).leg(q0, q1, space.limits, space.rate_hz)
             assert len(arrays.t) <= len(reference.t), f"{arrays.t[-1]:.3f} s is longer than minimum-jerk {reference.t[-1]:.3f} s"
 
 
 def test_dense_paths_are_followed_point_by_point_inside_the_limits():
-    law = TimeLaw("toppra", peak_speed_fraction=1.0)
+    law = TimeParameterization("toppra", peak_speed_fraction=1.0)
     for space in (pendulum(), fivebar(), ur5e()):
         path = dense_path(space)
         timed = law.along(path, space.limits, space.rate_hz)
@@ -137,19 +138,19 @@ def test_dense_paths_are_followed_point_by_point_inside_the_limits():
         # difference of the points (twice the textbook bound, for the spline's own wiggle)
         bound = float(np.max(np.abs(np.diff(path, 2, axis=0)))) / 4.0 + 1e-9
         assert miss <= bound, f"the samples leave the path read at path_progress by {miss:.2e} rad (bound {bound:.2e})"
-        reference = TimeLaw.minimum_jerk(peak_speed_fraction=1.0).along(path, space.limits, space.rate_hz).arrays
+        reference = TimeParameterization.minimum_jerk(peak_speed_fraction=1.0).along(path, space.limits, space.rate_hz).arrays
         assert arrays.t[-1] <= reference.t[-1], f"{arrays.t[-1]:.3f} s is longer than minimum-jerk along it {reference.t[-1]:.3f} s"
 
 
 def test_a_cartesian_line_through_toppra_tracks_its_commanded_points_within_a_millimetre():
-    law = TimeLaw("toppra", peak_speed_fraction=1.0)
+    law = TimeParameterization("toppra", peak_speed_fraction=1.0)
     five = JointSpace.from_limits(robots.FIVEBAR_LIMITS, home=np.radians([100.0, -76.0])).with_kinematics(robots.FiveBarKinematics())
     arm = ur5e().with_kinematics(robots.UR5eKinematics())
     five_tool = five.forward(FIVEBAR_START)[:3, 3]
     arm_tool = arm.forward(arm.home)[:3, 3]
     for space, start, tool, end in ((five, FIVEBAR_START, five_tool, five_tool + (0.03, 0.03, 0.0)),
                                     (arm, arm.home, arm_tool, arm_tool + (0.10, 0.05, -0.05))):
-        line = rt.cartesian_path(space, [end], time_law=law, start=start)
+        line = rt.cartesian_path(space, [end], time_parameterization=law, start=start)
         check_kind(line, space)
         target = line.channels[TOOL_TARGET]
         rows = np.flatnonzero(np.isfinite(target[:, 0]))
@@ -160,7 +161,8 @@ def test_a_cartesian_line_through_toppra_tracks_its_commanded_points_within_a_mi
         offsets = reached - tool
         off = float(np.max(np.linalg.norm(offsets - np.outer(offsets @ direction, direction), axis=1)))
         assert off <= MM, f"the tool leaves the straight line by {off * 1000:.3f} mm"
-        slow = rt.cartesian_path(space, [end], start=start, time_law=TimeLaw.minimum_jerk(peak_speed_fraction=1.0))
+        slow = rt.cartesian_path(space, [end], start=start,
+                                 time_parameterization=TimeParameterization.minimum_jerk(peak_speed_fraction=1.0))
         assert line.t[-1] <= slow.t[-1], f"toppra {line.t[-1]:.3f} s is slower than minimum-jerk {slow.t[-1]:.3f} s on the line"
 
 
@@ -169,7 +171,7 @@ def test_time_optimal_path_kind_on_three_robots():
         path = dense_path(space, 60)
         tape = rt.time_optimal_path(space, path)
         check_kind(tape, space)
-        reference = TimeLaw.minimum_jerk(peak_speed_fraction=1.0).along(path, space.limits, space.rate_hz).arrays
+        reference = TimeParameterization.minimum_jerk(peak_speed_fraction=1.0).along(path, space.limits, space.rate_hz).arrays
         assert tape.t[-1] <= reference.t[-1], f"{tape.t[-1]:.3f} s is longer than minimum-jerk along the same path"
         alone = rt.time_optimal_path(space)  # the contract: every kind is callable as f(space) alone (a default loop path)
         check_kind(alone, space)
@@ -191,7 +193,7 @@ def test_time_optimal_path_kind_on_three_robots():
 
 def test_refuses_moving_ends_a_torque_mode_without_its_inputs_and_unknown_options_by_name():
     space = pendulum()
-    law = TimeLaw("toppra", peak_speed_fraction=1.0)
+    law = TimeParameterization("toppra", peak_speed_fraction=1.0)
     try:
         law.leg(np.zeros(1), np.full(1, 0.2), space.limits, space.rate_hz, end_state=BoundaryState(np.full(1, 0.5), np.zeros(1)))
     except ValueError as error:
@@ -201,7 +203,8 @@ def test_refuses_moving_ends_a_torque_mode_without_its_inputs_and_unknown_option
     for options, words in (({"torque_limits": True}, "no option ['torque_limits']"), ({"grid": 50}, "no option ['grid']"),
                            ({"acceleration_fraction": 1.5}, "acceleration_fraction"), ({"grid_points": 1}, "grid_points")):
         try:
-            TimeLaw("toppra", peak_speed_fraction=1.0, options=options).leg(np.zeros(1), np.full(1, 0.2), space.limits, space.rate_hz)
+            TimeParameterization("toppra", peak_speed_fraction=1.0, options=options).leg(np.zeros(1), np.full(1, 0.2),
+                                                                                         space.limits, space.rate_hz)
         except ValueError as error:
             assert words in str(error), (options, error)
         else:

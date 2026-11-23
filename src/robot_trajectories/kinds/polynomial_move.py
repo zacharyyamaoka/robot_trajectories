@@ -7,7 +7,7 @@ import numpy as np
 from .. import kernels as k
 from ..registry import kind
 from ..segments import Motion
-from ..time_law import BoundaryState, TimeLaw
+from ..time_parameterization import BoundaryState, TimeParameterization
 
 
 def _cubic(q0, v0, q1, v1, total: float, t: np.ndarray):
@@ -29,7 +29,7 @@ def polynomial_move(space, target=None, *, order=5, duration_s=1.0, end_velocity
     rest), so a move can end moving into the next one (``chain`` joins a moving end to a start in that exact state).
 
     The duration is a floor: when a velocity or acceleration limit binds, the move is lengthened (the notes say so), as
-    ``TimeLaw.minimum_jerk(move_s=...).leg(..., start_state=, end_state=)`` does for the quintic; the cubic is searched the same
+    ``TimeParameterization.minimum_jerk(move_s=...).leg(..., start_state=, end_state=)`` does for the quintic; the cubic is searched the same
     way. With the rest-to-rest defaults and order 5 this is the minimum-jerk leg. ``target=None`` moves half way to the top of the room.
 
     WHY ``ends="moving"`` even when the end state is rest: the end state is an argument, so the declaration must allow it; a rest
@@ -50,7 +50,7 @@ def polynomial_move(space, target=None, *, order=5, duration_s=1.0, end_velocity
     a1 = zeros if end_acceleration_rad_s2 is None else np.broadcast_to(np.asarray(end_acceleration_rad_s2, float), (space.dof,)).copy()
     notes: list[str] = []
     if order == 5:
-        law = TimeLaw.minimum_jerk(move_s=duration_s)
+        law = TimeParameterization.minimum_jerk(move_s=duration_s)
         leg = law.leg(q0, goal, space.limits, space.rate_hz, label=f"{label}: quintic", start_state=BoundaryState(start.qd, start.qdd),
                       end_state=BoundaryState(v1, a1))
     else:

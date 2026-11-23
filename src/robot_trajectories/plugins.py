@@ -8,22 +8,25 @@ registers itself in its own ``pyproject.toml``:
     [project.entry-points."robot_trajectories.kinds"]
     my_kinds = "my_package.kinds"                  # a module whose @kind functions register on import
 
-    [project.entry-points."robot_trajectories.time_laws"]
-    ruckig = "robot_trajectories_ruckig:RuckigBackend"   # a TimeLawBackend (an instance, or a class made with no arguments)
+    [project.entry-points."robot_trajectories.time_parameterizations"]
+    ruckig = "robot_trajectories_ruckig:RuckigBackend"   # a TimeParameterizationBackend (an instance, or a no-argument class)
 
 The roles (prior-art note 2026-11-18, section 7: every framework cuts the same seams, and "simple vs complex" is not one):
 
 - ``robot_trajectories.kinds``: kinds, ``f(space, ..., start=None) -> JointTrajectory``, registered with ``@kind``;
-- ``robot_trajectories.time_laws``: a path and limits in, a timed trajectory out (``time_law.TimeLawBackend``): Ruckig,
-  Ruckig Pro (a drop-in for the same name, never installed beside Community), TOPP-RA;
+- ``robot_trajectories.time_parameterizations``: a path and limits in, a timed trajectory out
+  (``time_parameterization.TimeParameterizationBackend``): Ruckig, Ruckig Pro (a drop-in for the same name, never installed
+  beside Community), TOPP-RA. Its name before the rename of 2026-11-23, ``robot_trajectories.time_laws``, is still read: a
+  plugin built against it still loads, and a name declared in both groups is the new group's;
 - ``robot_trajectories.planners`` (reserved, not loaded yet): start, goal and the space's collision check in, joint path
-  points out (caelan's motion-planners, OMPL, VAMP); a time law then times the path;
+  points out (caelan's motion-planners, OMPL, VAMP); a time parameterization then times the path;
 - ``robot_trajectories.optimizers`` (reserved, not loaded yet): path and timing chosen together (Drake, cuRobo, TrajOpt,
   Ruckig Pro's waypoint mode); they register as kinds that need a model.
 
 ``import robot_trajectories`` loads every installed plugin once. A plugin kind is then listed, tagged, guarded and recorded
-exactly like a built-in one (``kinds()[name].plugin`` names its distribution); a time law serves ``TimeLaw(name, ...)``. A
-plugin that fails to load is reported (``errors()`` and a warning), and the rest still load.
+exactly like a built-in one (``kinds()[name].plugin`` names its distribution); a time parameterization serves
+``TimeParameterization(name, ...)``. A plugin that fails to load is reported (``errors()`` and a warning), and the rest still
+load.
 
 WHY entry points: the standard Python plugin mechanism (``importlib.metadata``, stdlib), so a plugin is an ordinary
 installable package and this leaf never names it (tests/test_boundary.py).
@@ -36,7 +39,9 @@ from importlib import metadata
 from typing import Any
 
 KIND_GROUP = "robot_trajectories.kinds"
-TIME_LAW_GROUP = "robot_trajectories.time_laws"
+TIME_PARAMETERIZATION_GROUP = "robot_trajectories.time_parameterizations"
+LEGACY_TIME_LAW_GROUP = "robot_trajectories.time_laws"  # the group's name before 2026-11-23, still read
+TIME_LAW_GROUP = TIME_PARAMETERIZATION_GROUP  # deprecated alias (time_law.py says why): the group a plugin declares now
 PLANNER_GROUP = "robot_trajectories.planners"  # reserved: the role exists, nothing loads it yet
 OPTIMIZER_GROUP = "robot_trajectories.optimizers"  # reserved
 
@@ -54,20 +59,28 @@ def load(*, refresh: bool = False) -> list[str]:
         return list(_state["errors"])
     _state["loaded"] = True
     from . import registry
-    from .time_law import register_time_law
+    from .time_parameterization import register_time_parameterization
 
-    # WHY time laws first: a plugin kind may build a TimeLaw of a plugin backend when it is imported
-    for point in metadata.entry_points(group=TIME_LAW_GROUP):
-        key = (TIME_LAW_GROUP, point.name, point.value)
+    # WHY time parameterizations first: a plugin kind may build a TimeParameterization of a plugin backend when it is imported
+    current = list(metadata.entry_points(group=TIME_PARAMETERIZATION_GROUP))
+    # WHY the old group too (the rename of 2026-11-23): a plugin built before it declares robot_trajectories.time_laws and must
+    # still load. A name in both groups is the new group's: its old entry is skipped, never registered beside it as a second
+    # provider (which backend() would refuse as ambiguous)
+    declared = {point.name for point in current}
+    legacy = [point for point in metadata.entry_points(group=LEGACY_TIME_LAW_GROUP) if point.name not in declared]
+    for group, point in [*((TIME_PARAMETERIZATION_GROUP, point) for point in current),
+                         *((LEGACY_TIME_LAW_GROUP, point) for point in legacy)]:
+        key = (group, point.name, point.value)
         if key in _state["loaded_points"]:
             continue
         _state["loaded_points"].add(key)
         try:
             loaded = point.load()
             backend = loaded() if isinstance(loaded, type) else loaded
-            register_time_law(backend, provider=_provider(point))
+            register_time_parameterization(backend, provider=_provider(point))
         except Exception as error:  # noqa: BLE001
-            _report(f"time-law plugin {point.name!r} ({point.value}) failed to load: {type(error).__name__}: {error}")
+            _report(f"time-parameterization plugin {point.name!r} ({point.value}) failed to load: {type(error).__name__}: "
+                    f"{error}")
     for point in metadata.entry_points(group=KIND_GROUP):
         key = (KIND_GROUP, point.name, point.value)
         if key in _state["loaded_points"]:
@@ -93,4 +106,5 @@ def errors() -> list[str]:
     return list(_state["errors"])
 
 
-__all__ = ["KIND_GROUP", "OPTIMIZER_GROUP", "PLANNER_GROUP", "TIME_LAW_GROUP", "errors", "load"]
+__all__ = ["KIND_GROUP", "LEGACY_TIME_LAW_GROUP", "OPTIMIZER_GROUP", "PLANNER_GROUP", "TIME_LAW_GROUP",
+           "TIME_PARAMETERIZATION_GROUP", "errors", "load"]

@@ -13,7 +13,8 @@ changing the API. Adding kinds: `docs/KINDS_TODO.md` is the contract the lanes w
   `tests/kind_contract.py` checks labels.
 - **Leaf rule.** Runtime: numpy + robot_msgs (editable `/home/bam/robot_msgs`) + the stdlib, nothing else. A RobotDescription,
   ReachMap, kinematics, dynamics model or collision checker enters by shape, never by import; plugins (Ruckig, TOPP-RA, a
-  robot's own kinds) arrive by entry point (`robot_trajectories.kinds`, `robot_trajectories.time_laws`), never named here.
+  robot's own kinds) arrive by entry point (`robot_trajectories.kinds`, `robot_trajectories.time_parameterizations`; the old
+  `robot_trajectories.time_laws` is still read), never named here.
   Never import bam_reach, bam_robot_descriptions, bam_collision, pin_utils, sim2real, robot_models or the rigs.
   `tests/test_boundary.py` enforces it.
 - **No instance values in the package.** A rig's limits live in `examples/` or `tests/fixtures/`, and come in as arguments.
@@ -30,8 +31,15 @@ changing the API. Adding kinds: `docs/KINDS_TODO.md` is the contract the lanes w
 ## Core files (a change to one is a barrier: land it first, alone)
 
 `registry.py` (the `@kind` contract, `kinds()`, `catalog()`), `segments.py` (guard, chain, split, repeat, annotate), `space.py`
-(JointSpace and its protocols), `time_law.py` (TimeLaw, the time-law backend seam), `cartesian.py` (IK along tool paths),
-`moving.py` (the moving-target contract), `plugins.py` (entry points by role), `recipe.py` (rebuild, summary).
+(JointSpace and its protocols), `time_parameterization.py` (TimeParameterization, the time-parameterization backend seam),
+`cartesian.py` (IK along tool paths), `moving.py` (the moving-target contract), `plugins.py` (entry points by role), `recipe.py`
+(rebuild, summary).
+
+**Names (Zach, 2026-11-23).** The stage is *trajectory generation*; the class role is a *time parameterization* (MoveIt's name:
+a path and limits in, a timed trajectory out); "time law" was an agent coinage he never used. The old names (`TimeLaw`,
+`TimeLawBackend`, `register_time_law`, `time_laws`, `time_law.py`, the `time_law=` / `approach_time_law=` keywords, the
+`robot_trajectories.time_laws` group) stay as silent deprecated aliases, because arm_motion_bench and its frozen datasets use
+them; a recipe still records those parameters under the old keys (`registry.RECORDED_AS`). Keep both until Zach drops them.
 
 ## Tests
 
@@ -44,7 +52,8 @@ taskset -c 2-5,16,17 nice -n 19 /home/bam/robot_trajectories/.venv/bin/python /h
 
 The files: `test_scenario.py` (the round's ruler, G1-G4), `test_equivalence.py` (v6, bit for bit), `test_contract.py` (the kind
 contract), `test_cartesian.py` (FK/IK passed in), `test_plugins.py` (entry points), `test_selfcheck.py` (v6's claims, carried
-over), `test_catalog.py`, `test_boundary.py`. Don't edit a green test except to add. A new kind's test calls
+over), `test_catalog.py`, `test_boundary.py`, `test_time_parameterization_names.py` (the old names, keyword and entry-point
+group still work). Don't edit a green test except to add. A new kind's test calls
 `kind_contract.check_kind(trajectory, space)`.
 
 ## Machine and repo

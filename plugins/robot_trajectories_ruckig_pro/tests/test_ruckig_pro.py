@@ -1,5 +1,6 @@
-"""The ``ruckig`` time law from the local Ruckig Pro build, a drop-in for the Community plugin, held to robot_trajectories'
-TimeLawBackend contract on the pendulum, the five-bar and the UR5e, through its real entry point. A plain script:
+"""The ``ruckig`` time parameterization from the local Ruckig Pro build, a drop-in for the Community plugin, held to
+robot_trajectories' TimeParameterizationBackend contract on the pendulum, the five-bar and the UR5e, through its real entry
+point. A plain script:
 
     /home/bam/robot_trajectories/plugins/robot_trajectories_ruckig_pro/.venv/bin/python /home/bam/robot_trajectories/plugins/robot_trajectories_ruckig_pro/tests/test_ruckig_pro.py
 
@@ -27,7 +28,7 @@ import robot_trajectories as rt  # noqa: E402
 import scenario  # noqa: E402
 from fixtures import robots  # noqa: E402
 from kind_contract import check_kind  # noqa: E402
-from robot_trajectories import BoundaryState, JointSpace, TimeLaw  # noqa: E402
+from robot_trajectories import BoundaryState, JointSpace, TimeParameterization  # noqa: E402
 
 PROVIDER = "robot-trajectories-ruckig-pro"
 COMMUNITY = "robot-trajectories-ruckig"
@@ -125,12 +126,13 @@ def test_found_through_its_entry_point_in_a_fresh_interpreter_with_its_provenanc
         "from importlib import metadata\n"
         "import robot_trajectories as rt\n"
         "from robot_trajectories import plugins\n"
-        "points = [p for p in metadata.entry_points(group='robot_trajectories.time_laws') if p.name == 'ruckig']\n"
+        "points = [p for p in metadata.entry_points(group='robot_trajectories.time_parameterizations') if p.name == 'ruckig']\n"
         "assert [p.value for p in points] == ['robot_trajectories_ruckig_pro:RuckigProBackend'], points\n"
-        "rt.TimeLaw('ruckig', peak_speed_fraction=1.0)\n"
-        f"assert [e.provider for e in rt.time_laws()['ruckig']] == [{PROVIDER!r}], rt.time_laws()['ruckig']\n"
+        "rt.TimeParameterization('ruckig', peak_speed_fraction=1.0)\n"
+        f"assert [e.provider for e in rt.time_parameterizations()['ruckig']] == [{PROVIDER!r}], "
+        "rt.time_parameterizations()['ruckig']\n"
         "assert plugins.errors() == [], plugins.errors()\n"
-        "serving = rt.time_law.backend('ruckig')\n"
+        "serving = rt.time_parameterization.backend('ruckig')\n"
         "assert serving.edition == 'pro', serving\n"
         f"assert str(serving.provenance.source_checkout) == {str(CHECKOUT.resolve())!r}, serving.provenance\n"
         "print('found', serving.provenance.version, serving.provenance.module_sha256[:12])\n")
@@ -145,7 +147,7 @@ def test_refuses_to_load_beside_the_community_distribution():
         (info / "METADATA").write_text("Metadata-Version: 2.1\nName: ruckig\nVersion: 0.19.4\n")
         done = fresh("import warnings\nwarnings.simplefilter('ignore')\n"
                      "import robot_trajectories as rt\nfrom robot_trajectories import plugins\nplugins.load()\n"
-                     "assert 'ruckig' not in rt.time_laws(), rt.time_laws()\n"
+                     "assert 'ruckig' not in rt.time_parameterizations(), rt.time_parameterizations()\n"
                      "assert any(\"both the 'ruckig' and 'ruckig-pro'\" in e for e in plugins.errors()), plugins.errors()\n"
                      "print('refused')\n", site)
     assert done.returncode == 0 and "refused" in done.stdout, done.stderr[-3000:]
@@ -161,7 +163,7 @@ def test_refuses_to_load_a_build_from_another_checkout():
         for checkout, words in ((elsewhere, "wrong source"), (wrong_name, "must be a folder named")):
             done = fresh("import warnings\nwarnings.simplefilter('ignore')\n"
                          "import robot_trajectories as rt\nfrom robot_trajectories import plugins\nplugins.load()\n"
-                         "assert 'ruckig' not in rt.time_laws(), rt.time_laws()\n"
+                         "assert 'ruckig' not in rt.time_parameterizations(), rt.time_parameterizations()\n"
                          f"assert any({words!r} in e for e in plugins.errors()), plugins.errors()\n"
                          "print('refused')\n", env={"ROBOT_TRAJECTORIES_RUCKIG_PRO_CHECKOUT": str(checkout)})
             assert done.returncode == 0 and "refused" in done.stdout, done.stderr[-3000:]
@@ -174,12 +176,12 @@ def test_rest_to_rest_legs_inside_their_limits_and_no_longer_than_minimum_jerk()
     need_pro()
     for space in (pendulum(), fivebar(), ur5e()):
         for q0, q1 in legs(space):
-            reference = TimeLaw.minimum_jerk(peak_speed_fraction=1.0).leg(q0, q1, space.limits, space.rate_hz)
+            reference = TimeParameterization.minimum_jerk(peak_speed_fraction=1.0).leg(q0, q1, space.limits, space.rate_hz)
             distance = np.abs(q1 - q0)
             # WHY this jerk: the min-jerk leg's own peak jerk, 60 |d| / T^3, makes min-jerk one candidate of Ruckig's search
             jerk = np.where(distance > 0, 60.0 * distance / reference.t[-1] ** 3, np.max(60.0 * distance / reference.t[-1] ** 3))
             limits = space.limits.replace(max_jerk=jerk)
-            arrays = TimeLaw("ruckig", peak_speed_fraction=1.0).leg(q0, q1, limits, space.rate_hz)
+            arrays = TimeParameterization("ruckig", peak_speed_fraction=1.0).leg(q0, q1, limits, space.rate_hz)
             assert np.allclose(arrays.t, np.arange(len(arrays.t)) / space.rate_hz, atol=1e-12), "not on the rate's grid"
             assert np.array_equal(arrays.q[0], q0) and np.array_equal(arrays.q[-1], q1) and not np.any(arrays.qd[[0, -1]])
             assert len(arrays.t) <= len(reference.t), f"{arrays.t[-1]:.3f} s is longer than minimum-jerk {reference.t[-1]:.3f} s"
@@ -188,7 +190,7 @@ def test_rest_to_rest_legs_inside_their_limits_and_no_longer_than_minimum_jerk()
 
 def test_waypoint_paths_pass_every_point_in_order_inside_the_limits():
     need_pro()
-    law = TimeLaw("ruckig", peak_speed_fraction=1.0)
+    law = TimeParameterization("ruckig", peak_speed_fraction=1.0)
     for space in (pendulum(), fivebar(), ur5e()):
         path = waypoints(space)
         timed = law.along(path, space.limits, space.rate_hz)
@@ -208,8 +210,9 @@ def test_position_limits_are_enforced_where_community_refuses():
     # From rest at 0.25 rad, arrive at 0.30 rad moving back at 1.5 rad/s: the time-optimal swing passes the 0.33 rad limit.
     # Community refuses it (it ignores position limits); Pro keeps the limit or refuses by name, never leaves it.
     try:
-        arrays = TimeLaw("ruckig", peak_speed_fraction=1.0).leg(np.full(1, 0.25), np.full(1, 0.30), space.limits, space.rate_hz,
-                                                                end_state=BoundaryState(np.full(1, -1.5), np.zeros(1)))
+        arrays = TimeParameterization("ruckig", peak_speed_fraction=1.0).leg(np.full(1, 0.25), np.full(1, 0.30), space.limits,
+                                                                             space.rate_hz,
+                                                                             end_state=BoundaryState(np.full(1, -1.5), np.zeros(1)))
     except ValueError as error:
         assert "position" in str(error).lower() or "limit" in str(error).lower(), error
     else:
@@ -217,7 +220,7 @@ def test_position_limits_are_enforced_where_community_refuses():
         assert np.array_equal(arrays.qd[-1], [-1.5]) and np.array_equal(arrays.q[-1], [0.30])
     # And through waypoints: a path hugging the upper limit stays under it.
     path = np.array([[0.0], [0.30], [0.32], [0.10]])
-    arrays = TimeLaw("ruckig", peak_speed_fraction=1.0).along(path, space.limits, space.rate_hz).arrays
+    arrays = TimeParameterization("ruckig", peak_speed_fraction=1.0).along(path, space.limits, space.rate_hz).arrays
     within(arrays, space.limits, space.rate_hz)
     passes_in_order(arrays.q, path, 2e-5)
 
@@ -227,12 +230,13 @@ def test_moving_ends_land_exactly_on_the_grid_for_legs_and_waypoint_paths():
     space = fivebar()
     end = BoundaryState(np.array([0.5, -0.3]), np.zeros(2))
     q0, q1 = legs(space)[1]
-    leg = TimeLaw("ruckig", peak_speed_fraction=1.0).leg(q0, q1, space.limits, space.rate_hz, end_state=end)
+    leg = TimeParameterization("ruckig", peak_speed_fraction=1.0).leg(q0, q1, space.limits, space.rate_hz, end_state=end)
     assert np.array_equal(leg.qd[-1], end.velocity) and np.array_equal(leg.q[-1], q1)
     within(leg, space.limits, space.rate_hz)
-    backend = rt.time_law.backend("ruckig")
+    backend = rt.time_parameterization.backend("ruckig")
     path = waypoints(space, 5)
-    out = backend.time_parameterize(path, space.limits, space.rate_hz, TimeLaw("ruckig", peak_speed_fraction=1.0), end_state=end)
+    out = backend.time_parameterize(path, space.limits, space.rate_hz, TimeParameterization("ruckig", peak_speed_fraction=1.0),
+                                    end_state=end)
     assert np.allclose(out.t, np.arange(len(out.t)) / space.rate_hz, atol=1e-12), "a moving waypoint path is not on the grid"
     assert np.array_equal(out.velocities[-1], end.velocity) and np.array_equal(out.positions[-1], path[-1])
     passes_in_order(out.positions, path, 2e-5)
@@ -244,7 +248,8 @@ def test_a_cartesian_line_through_ruckig_pro_tracks_within_a_millimetre():
                                    home=np.radians([100.0, -76.0])).with_kinematics(robots.FiveBarKinematics())
     tool = space.forward(FIVEBAR_START)[:3, 3]
     end = tool + (0.03, 0.0, 0.0)
-    line = rt.cartesian_path(space, [end], time_law=TimeLaw("ruckig", peak_speed_fraction=0.5), start=FIVEBAR_START)
+    line = rt.cartesian_path(space, [end], time_parameterization=TimeParameterization("ruckig", peak_speed_fraction=0.5),
+                             start=FIVEBAR_START)
     check_kind(line, space)
     reached = space.tool_points(line)
     direction = (end - tool) / np.linalg.norm(end - tool)

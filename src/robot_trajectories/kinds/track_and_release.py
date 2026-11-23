@@ -5,15 +5,15 @@ import numpy as np
 from ..registry import LIMITS, kind
 from ..segments import Motion
 from ..space import State
-from ..time_law import TimeLaw
+from ..time_parameterization import TimeParameterization
 from . import _lane_f as f
 
 
 @kind(use_cases=("tracking_eval", "conveyor_pick_and_place"), needs=(*LIMITS, "forward_kinematics", "inverse_kinematics"),
       unchecked=("collision_model",), catalog_id="track_and_release", starts="moving")
 def track_and_release(space, target=None, *, dwell_s=0.3, leave_m=0.05, leave_direction=(0.0, 0.0, 1.0), target_clock_s=0.0,
-                      time_law=TimeLaw.minimum_jerk(peak_speed_fraction=0.3), tolerance_m=1e-4, label="track, then leave",
-                      start=None):
+                      time_parameterization=TimeParameterization.minimum_jerk(peak_speed_fraction=0.3), tolerance_m=1e-4,
+                      label="track, then leave", start=None):
     """The second half of a moving-target cycle: already moving with a point (``start`` is the state a trajectory ends in,
     moving: pass that trajectory, e.g. ``meet_moving_point``'s, the first half), keep the tool where it is in the point's frame for ``dwell_s``, then leave ``leave_m``
     along ``leave_direction`` (base frame; on a planar robot its plane's up) while braking to rest.
@@ -22,7 +22,7 @@ def track_and_release(space, target=None, *, dwell_s=0.3, leave_m=0.05, leave_di
       velocity (the only target a start is sure to move with; at rest, a fixed point); ``target_clock_s`` is where this trajectory's t = 0 falls on the
       target's clock (the end time of the trajectory it continues, when that one's t = 0 was the target's).
     - The leave is a tool path given in time: velocity V (1 - s) + D s'/T, so the tool starts moving with the point and rises
-      off it before it stops (V T / 2 further along the point's way, ``leave_m`` along the direction); ``time_law`` sets how
+      off it before it stops (V T / 2 further along the point's way, ``leave_m`` along the direction); ``time_parameterization`` sets how
       fast the rise is (its leg timing for the joint move it amounts to), and the duration grows until every joint is inside
       its limits.
 
@@ -67,6 +67,7 @@ def track_and_release(space, target=None, *, dwell_s=0.3, leave_m=0.05, leave_di
     def make(count: int, stride: int):
         return f.coast(leave_from, leave_velocity, count, rate, rotation, begin_s=begin, displacement=leave_m * direction, stride=stride)
 
-    first_try = max(int(np.ceil(time_law.min_move_s * rate)), f.law_steps(space, time_law, end.q, goal), f.braking_steps(space, end.qd))
+    first_try = max(int(np.ceil(time_parameterization.min_move_s * rate)), f.law_steps(space, time_parameterization, end.q, goal),
+                    f.braking_steps(space, end.qd))
     pieces.append(f.fitted(space, make, first_try, end.q, label=f"{label}: leave", first=end, tolerance_m=tolerance_m))
     return Motion(pieces, notes, {"assumes": moving.assumes, "sync": [0.0, begin]})

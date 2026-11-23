@@ -46,8 +46,8 @@ split(session); labels(session); bands(session); notes(session)     # segments a
 repeat(tape, 5); annotate(t, "what it measures", wait_after=True)   # pure functions on trajectories
 rebuild(recipe(session)) == session                                 # every call recorded, defaults written out; refuses another space
 cartesian_path(space, [p1, p2]); cartesian_waypoints(space, points); pick_and_place(space, pick, place, lift_m=0.05)
-joint_waypoints(space, [[...], [...]], time_law=TimeLaw.trapezoid(peak_speed_fraction=0.8))
-TimeLaw.minimum_jerk(peak_speed_fraction=0.6); TimeLaw("ruckig", ...)   # a time law names a backend: built in or a plugin
+joint_waypoints(space, [[...], [...]], time_parameterization=TimeParameterization.trapezoid(peak_speed_fraction=0.8))
+TimeParameterization.minimum_jerk(peak_speed_fraction=0.6); TimeParameterization("ruckig", ...)   # a time parameterization names a backend: built in or a plugin
 catalog(use_case="pid_tuning", space=space)                         # what generates here, and the catalog rows not built yet
 kinds()                                                             # the registry: in-tree kinds/*.py and entry-point plugins
 @kind(use_cases=..., needs=..., catalog_id=..., starts_as=..., dimensions=...)   # a new kind: one decorated function, one file
@@ -65,10 +65,10 @@ summary(session)                                                    # one line p
 | the robot | a `Workspace` handed to a `JointTrajectoryGenerator` (V4) | a `JointSpace` passed as every kind's first argument, its slots injected |
 | the result | a `Program` (`.trajectory`, `.segments`, `.steps`, `to_json`) | the `JointTrajectory` itself: segments are a per-sample channel plus labels in `header.meta` (V1 decision 2) |
 | configuration | a program config (records + workspace) | a recipe: every call, every argument, the space's record and fingerprint |
-| time laws | minimum-jerk only | minimum-jerk and trapezoid built in, any other from a plugin; legs may start or end moving |
+| time parameterizations | minimum-jerk only | minimum-jerk and trapezoid built in, any other from a plugin; legs may start or end moving |
 | Cartesian | slots that gated, generating nothing | `cartesian_path`, `cartesian_waypoints`, `pick_and_place` with FK/IK passed in |
 | multi-waypoint | `Move` (fractions of the room) | `move` and `joint_waypoints` (absolute configurations), `cartesian_waypoints` |
-| plugins | none | entry points by role: `robot_trajectories.kinds`, `.time_laws` (`.planners`, `.optimizers` reserved) |
+| plugins | none | entry points by role: `robot_trajectories.kinds`, `.time_parameterizations` (`.planners`, `.optimizers` reserved) |
 | collision, moving targets | catalogued, unchecked | collision slots checked by the guard; a moving-target contract and ruler |
 | motion | v6 | **v6, bit for bit** (§9) |
 
@@ -168,10 +168,19 @@ Fixtures (numpy only, `tests/fixtures/robots.py`): the pendulum's limits and a s
 closed-form FK/IK of its tool point (the bench geometry); the UR5e's DH forward kinematics and damped-least-squares inverse;
 `UR5eScene`, a floor plus a box checked at the DH frame origins.
 
-## 6. Time laws, and plugins by role
+## 6. Time parameterizations, and plugins by role
 
-`TimeLaw(shape, peak_speed_fraction= | move_s=, min_move_s=, ramp_fraction=, options=)`. A path kind takes one as its timing
-argument (`Path x time law -> JointTrajectory`, the refined spec). Built in: **minimum-jerk** (v6's, unchanged) and
+> **Renamed 2026-11-23** (Zach asked for a better name than "time law", an agent coinage he never used): the stage is
+> *trajectory generation*; the class role is a *time parameterization*, MoveIt's name for the same role (a path and limits
+> in, a timed trajectory out). `TimeLaw` → `TimeParameterization`, `TimeLawBackend` → `TimeParameterizationBackend`,
+> `register_time_law` → `register_time_parameterization`, `time_laws()` → `time_parameterizations()`, `time_law.py` →
+> `time_parameterization.py`, `time_law=` → `time_parameterization=`, entry-point group `robot_trajectories.time_laws` →
+> `robot_trajectories.time_parameterizations`. The old names stay as silent aliases (the same objects), the old keyword is
+> still accepted, the old group is still read (the new one wins a name clash), and a recipe keeps its `"time_law"` keys, so
+> arm_motion_bench's frozen datasets rebuild unchanged. Undo: `git revert` the rename commit.
+
+`TimeParameterization(shape, peak_speed_fraction= | move_s=, min_move_s=, ramp_fraction=, options=)`. A path kind takes one as its timing
+argument (`Path x time parameterization -> JointTrajectory`, the refined spec). Built in: **minimum-jerk** (v6's, unchanged) and
 **trapezoid** (Pilz PTP's profile, a fixed ramp fraction). `law.leg(q0, q1, limits, rate, start_state=, end_state=,
 dynamics=)` times one leg (the quintic through both states when either end moves; a trapezoid refuses a moving end by name);
 `law.along(path, limits, rate, dynamics=)` follows a dense joint path (q(s), its derivatives set the duration). `dynamics` is
@@ -183,11 +192,11 @@ role; Ruckig Pro's waypoint mode is a different one.
 | entry-point group | role | in, out | built in | plugins |
 |---|---|---|---|---|
 | `robot_trajectories.kinds` | kinds | `f(space, ..., start)` -> JointTrajectory | `kinds/*.py` | a robot's own kinds; `tests/fixtures/plugin_site` (the test plugin) |
-| `robot_trajectories.time_laws` | time laws | path + limits (+ boundary states, + the space's dynamics when needed) -> timed JointTrajectory | minimum-jerk, trapezoid | Ruckig, Ruckig Pro, TOPP-RA (lane E; its torque-limited mode reads the dynamics) |
-| `robot_trajectories.planners` | planners (reserved) | start, goal, the space's collision check -> joint path points (a time law then times them) | none | caelan's motion-planners, OMPL, VAMP |
+| `robot_trajectories.time_parameterizations` | time parameterizations | path + limits (+ boundary states, + the space's dynamics when needed) -> timed JointTrajectory | minimum-jerk, trapezoid | Ruckig, Ruckig Pro, TOPP-RA (lane E; its torque-limited mode reads the dynamics) |
+| `robot_trajectories.planners` | planners (reserved) | start, goal, the space's collision check -> joint path points (a time parameterization then times them) | none | caelan's motion-planners, OMPL, VAMP |
 | `robot_trajectories.optimizers` | optimizers (reserved) | path and timing together; register as kinds that need a model | none | Drake, cuRobo, TrajOpt, Ruckig Pro waypoints |
 
-**The time-law protocol** (`TimeLawBackend`): `name`; `time_parameterize(path_points, limits, rate_hz, law, *,
+**The time-parameterization protocol** (`TimeParameterizationBackend`): `name`; `time_parameterize(path_points, limits, rate_hz, law, *,
 start_state=None, end_state=None) -> JointTrajectory` sampled at the rate from t = 0, starting and ending at the path's ends in
 the given states (rest by default), passing every point in order, inside `limits` (already scaled by the law's speed
 fraction), optionally with a `path_progress` channel; optional `can_service(...) -> str` (why not; MoveIt's
@@ -222,11 +231,11 @@ How a plugin repository registers itself (its `pyproject.toml`):
 [project.entry-points."robot_trajectories.kinds"]
 my_kinds = "my_package.kinds"                       # a module whose @kind functions register on import
 
-[project.entry-points."robot_trajectories.time_laws"]
+[project.entry-points."robot_trajectories.time_parameterizations"]
 ruckig = "robot_trajectories_ruckig:RuckigBackend"  # an instance, or a class made with no arguments
 ```
 
-`tests/test_plugins.py` holds this with `tests/fixtures/plugin_site/` (a kind and a time law, found through the real
+`tests/test_plugins.py` holds this with `tests/fixtures/plugin_site/` (a kind and a time parameterization, found through the real
 entry-point mechanism in a fresh interpreter, listed and guarded like built-ins).
 
 ## 7. Moving targets (the contract; the kinds are lane F)
@@ -257,18 +266,18 @@ against the encoder.
 
 ## 8. Cartesian and multi-waypoint, with FK/IK passed in
 
-- `cartesian_path(space, points_or_poses, time_law=, orientation="hold" | "follow")`: straight tool lines through the points,
+- `cartesian_path(space, points_or_poses, time_parameterization=, orientation="hold" | "follow")`: straight tool lines through the points,
   inverse kinematics every `eef_step_m` (1 mm), refused at the first failing sample with its index, the tool point and why (no
   solution, outside the limits, a miss above tolerance, a joint jump above `max_joint_step_rad` or `jump_threshold` x the mean
   step: MoveIt's computeCartesianPath and its jump threshold, which MoveIt itself has since dropped, so the check is ours). One
   rest-to-rest leg per line, a stop at each point (a corner turned at speed is an unbounded acceleration; a curve that does
   not stop is a path kind of its own: `cartesian_arc`, lane C). Timing: the joint path's derivatives set the duration under
-  the time law; positions are cubic Hermite in progress, so forward kinematics of the output tracks the line to micrometres.
+  the time parameterization; positions are cubic Hermite in progress, so forward kinematics of the output tracks the line to micrometres.
 - `cartesian_waypoints(space, points)`: inverse kinematics at the points only, joint-space legs between (the Cartesian twin
   of `joint_waypoints`).
 - `pick_and_place(space, pick, place, lift_m=, up=)`: the U: approach (a joint move), down, dwell, up, over, down, dwell, up,
   eight segments, the dwells `wait_after`.
-- `joint_waypoints(space, waypoints, time_law=, dwell_s=)`: absolute configurations, PTP legs.
+- `joint_waypoints(space, waypoints, time_parameterization=, dwell_s=)`: absolute configurations, PTP legs.
 - Tested on the UR5e and the five-bar (`tests/test_cartesian.py`): inside the limits, within 1 mm of every commanded tool
   point by forward kinematics, an independent line-distance oracle within 1 mm, an unreachable point refused, a line through a
   scene obstacle refused at its first colliding sample.
@@ -291,8 +300,8 @@ for bit, which no ported tape does (the floor tape's digests hold on all three r
   decorator and re-derive the digests.
 - **`repeat` makes one segment** (the floor is read from all plays together). Undo: emit one segment per play in
   `segments.repeat`.
-- **Plugin groups are named by role** (`time_laws`, reserved `planners` / `optimizers`), and two providers of one time law are
-  refused rather than ranked. Undo: rename the group constants in `plugins.py` / `time_law.py`.
+- **Plugin groups are named by role** (`time_parameterizations`, reserved `planners` / `optimizers`), and two providers of one time parameterization are
+  refused rather than ranked. Undo: rename the group constants in `plugins.py` / `time_parameterization.py`.
 - **`collision_model` is a real slot**: catalog rows needing it are locked without a checker (0.0.1 listed them "not
   checked"); kinds that only benefit list it in `unchecked`. Undo: put `collision_model` back in `UNCHECKED_NEEDS`.
 - **The guard checks collisions on every kind when the space has a checker**, not only on kinds that declare the need.
@@ -305,9 +314,9 @@ for bit, which no ported tape does (the floor tape's digests hold on all three r
   `kinds/meet_moving_point.py` and the row, put the stand-in back in `tests/fixtures/lane_f.py`.
 - **A moving target is recorded by its data form** (`moving.target_record`), the stored direction restored exactly rather
   than normalised again. Undo: drop `has_data_form` from `registry._encode` (kinds then take the mapping form only).
-- **Time-law backends see the dynamics** by a `dynamics=` keyword on `leg` / `along`, passed only to a backend whose needs
+- **Time-parameterization backends see the dynamics** by a `dynamics=` keyword on `leg` / `along`, passed only to a backend whose needs
   name `dynamics_model`, and the result's torque is held to `max_effort` by the caller. Undo: remove the keyword from
-  `time_law.py` and its callers, and `effort_fraction` from the TOPP-RA plugin and `time_optimal_path`.
+  `time_parameterization.py` and its callers, and `effort_fraction` from the TOPP-RA plugin and `time_optimal_path`.
 
 ## 11. Not built (and where it goes)
 

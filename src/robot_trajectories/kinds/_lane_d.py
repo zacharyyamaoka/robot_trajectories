@@ -4,7 +4,7 @@ What is here, and only because two or more of the nine kinds need it:
 - ``usable`` / ``line_clear`` / ``try_solve``: whether a configuration (or a joint-space line) is inside the room, has a tool pose
   and is free of collision; one inverse-kinematics answer checked the way ``cartesian.solve_points`` checks it, but returning
   None instead of raising (a candidate screen, not a refusal).
-- ``pose_set``: the house shape of a pose set (KINDS_TODO "Three output shapes", 1): stations joined by ``TimeLaw`` legs with a
+- ``pose_set``: the house shape of a pose set (KINDS_TODO "Three output shapes", 1): stations joined by ``TimeParameterization`` legs with a
   dwell piece at each, labelled ``"<label>: station k"``, the stations' configurations in the segment entry.
 - ``circle_path`` / ``plane_axes``: a tool circle for ``cartesian.follow`` (the private arc helper KINDS_TODO allows lane D).
 - ``look_at_rotation`` / ``rotation_between`` / ``rotation_about``: the tool orientations of the calibration view sets.
@@ -22,9 +22,9 @@ import numpy as np
 from .. import kernels as k
 from ..cartesian import tool_target_hold
 from ..segments import TOOL_TARGET, Motion, Piece
-from ..time_law import TimeLaw
+from ..time_parameterization import TimeParameterization
 
-DEFAULT_LAW = TimeLaw.minimum_jerk(peak_speed_fraction=0.5)
+DEFAULT_LAW = TimeParameterization.minimum_jerk(peak_speed_fraction=0.5)
 
 
 # ====================================================================== is a configuration usable?
@@ -94,9 +94,9 @@ def nearest_order(start: np.ndarray, configurations: Sequence[np.ndarray]) -> li
 
 
 def pose_set(space: Any, label: str, start: np.ndarray, stations: Sequence[np.ndarray], *, points: Sequence[Any] | None = None,
-             dwell_s: float, time_law: TimeLaw | None, room: k.Bounds | None = None, via: np.ndarray | None = None,
-             entry: dict[str, Any] | None = None, notes: Sequence[str] = ()) -> Motion:
-    """Stations visited in order: a ``time_law`` leg to each, then a dwell of ``dwell_s`` labelled ``"<label>: station k"``.
+             dwell_s: float, time_parameterization: TimeParameterization | None, room: k.Bounds | None = None,
+             via: np.ndarray | None = None, entry: dict[str, Any] | None = None, notes: Sequence[str] = ()) -> Motion:
+    """Stations visited in order: a ``time_parameterization`` leg to each, then a dwell of ``dwell_s`` labelled ``"<label>: station k"``.
 
     ``points``: the tool point commanded at each station (``tool_target`` is set on the dwell and on its leg's last sample, NaN
     between: the path between stations is not commanded). ``via``: a configuration every leg whose straight joint line is not
@@ -104,7 +104,7 @@ def pose_set(space: Any, label: str, start: np.ndarray, stations: Sequence[np.nd
     WHY a dwell at every station and refused without one (KINDS_TODO rule 1): a station is where the measurement happens."""
     if dwell_s <= 0:
         raise ValueError(f"{label}: dwell_s must be positive: a pose set measures at its stations")
-    law = time_law if time_law is not None else DEFAULT_LAW
+    law = time_parameterization if time_parameterization is not None else DEFAULT_LAW
     pieces: list[k.Arrays] = []
     here = np.asarray(start, float)
     for index, target in enumerate(stations, start=1):
@@ -189,14 +189,14 @@ def rotation_between(a: np.ndarray, b: np.ndarray) -> np.ndarray:
 # ====================================================================== tool speed
 
 
-def tool_speed_law(length_m: float, tool_speed_m_s: float) -> TimeLaw:
+def tool_speed_law(length_m: float, tool_speed_m_s: float) -> TimeParameterization:
     """A trapezoid over ``length_m`` whose cruise plateau is ``tool_speed_m_s``: T = L / (v (1 - ramp)). WHY a trapezoid: a stated
     tool speed (a standard's, a feed rate) must be a plateau the run holds, not the peak of a bell. If the joint limits bind,
     the law's duration is raised, never the limits (``peak_tool_speed`` says what came out)."""
     if tool_speed_m_s <= 0 or length_m <= 0:
         raise ValueError(f"tool speed and length must be positive, got {tool_speed_m_s} m/s over {length_m} m")
-    ramp = TimeLaw.trapezoid(move_s=1.0).ramp_fraction
-    return TimeLaw.trapezoid(move_s=length_m / (tool_speed_m_s * (1.0 - ramp)))
+    ramp = TimeParameterization.trapezoid(move_s=1.0).ramp_fraction
+    return TimeParameterization.trapezoid(move_s=length_m / (tool_speed_m_s * (1.0 - ramp)))
 
 
 def peak_tool_speed(piece: Any) -> float:

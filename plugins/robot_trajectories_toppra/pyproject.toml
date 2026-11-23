@@ -5,14 +5,14 @@ build-backend = "hatchling.build"
 [project]
 name = "robot-trajectories-toppra"
 version = "0.1.0"
-description = "TOPP-RA as a robot_trajectories time law ('toppra'): the fastest timing along a fixed joint path under velocity and acceleration limits."
+description = "TOPP-RA as a robot_trajectories time parameterization ('toppra'): the fastest timing along a fixed joint path under velocity and acceleration limits."
 authors = [{ name = "Zach Yamaoka" }]
 requires-python = ">=3.11"
 # WHY toppra pinned here and never in the core (prior-art note 2026-11-18 §5): its README says Python support "will be
 # dropped", and its 0.6.11 wheels are x86_64 only. The core stays numpy + robot_msgs; this package carries the risk.
 dependencies = ["robot-trajectories>=0.1.0", "toppra==0.6.11", "numpy>=1.26"]
 
-[project.entry-points."robot_trajectories.time_laws"]
+[project.entry-points."robot_trajectories.time_parameterizations"]
 toppra = "robot_trajectories_toppra:ToppraBackend"
 
 [tool.uv.sources]

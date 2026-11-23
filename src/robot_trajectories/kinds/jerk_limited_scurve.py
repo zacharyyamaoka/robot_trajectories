@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 
 from ..registry import kind
-from ..time_law import legs_through
+from ..time_parameterization import legs_through
 from ._lane_e import plugin_law
 
 TIMED = ("joint_limits", "velocity_limits", "acceleration_limits", "jerk_limits")
@@ -19,8 +19,8 @@ def jerk_limited_scurve(space, joint=None, *, targets_fraction=(0.5, -0.5), velo
 
     ``synchronization``: ``"phase"`` (default) keeps a multi-joint leg a straight line in joint space (memory
     five-bar-regression, "Phase, not Time"); ``"time"``, ``"time_if_necessary"`` or ``"none"`` as Ruckig names them. Timed by
-    the ``ruckig`` time law, a plugin (``robot-trajectories-ruckig``, or the Pro drop-in): without one installed the kind is
-    locked (``MissingRung``) naming the packages. ``joint_waypoints(space, ..., time_law=TimeLaw("ruckig", ...))`` takes absolute
+    the ``ruckig`` time parameterization, a plugin (``robot-trajectories-ruckig``, or the Pro drop-in): without one installed the kind is
+    locked (``MissingRung``) naming the packages. ``joint_waypoints(space, ..., time_parameterization=TimeParameterization("ruckig", ...))`` takes absolute
     configurations instead."""
     for target in targets_fraction:
         values = target if isinstance(target, tuple) else (target,)

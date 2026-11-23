@@ -29,7 +29,7 @@ def time_optimal_path(space, path=None, *, velocity_fraction=1.0, acceleration_f
     half the room (joints alternating in sign), across to -0.4 of it on every joint, and back to the start. The path is fixed
     and only its timing chosen (path-velocity decomposition); a path that does not begin at ``start`` gets the house transition
     into it. Every point must lie inside the position limits; the first one outside is refused by name. Timed by the
-    ``toppra`` time law, a plugin (``robot-trajectories-toppra``): without it the kind is locked (``MissingRung``)."""
+    ``toppra`` time parameterization, a plugin (``robot-trajectories-toppra``): without it the kind is locked (``MissingRung``)."""
     # WHY built here, not as a default argument: a default is evaluated at import, before plugins load (KINDS_TODO lane E)
     options = {"acceleration_fraction": acceleration_fraction, "grid_points": int(grid_points)}
     if effort_fraction is not None:

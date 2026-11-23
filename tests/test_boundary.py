@@ -75,7 +75,7 @@ PLANTED = [
     ("space.py", "from bam_robot_descriptions import RobotDescription\n", "space.py: imports bam_robot_descriptions"),
     ("kinds/chirp.py", "def f():\n    import scipy.signal\n", "kinds/chirp.py: imports scipy"),
     ("segments.py", "import kernels as k\n", "segments.py: imports kernels"),
-    ("time_law.py", "import ruckig\n", "time_law.py: imports ruckig"),
+    ("time_parameterization.py", "import ruckig\n", "time_parameterization.py: imports ruckig"),
     ("this_week.py", "MAX_ACCELERATION = 7.3896\n", "this_week.py: holds the instance value 7.3896"),
     ("plugins.py", "from importlib import metadata\nfrom . import kernels as k\nimport numpy as np\nfrom robot_msgs import save_npz\n", None),
 ]

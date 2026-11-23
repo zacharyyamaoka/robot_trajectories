@@ -12,7 +12,7 @@
   sample of a ToolPath, the joint velocity J^+ v and acceleration J^+ (a - Jdot qdot) that give the tool's.
 - ``synced``: a chase that must keep pace (``CannotCatch`` when it cannot); ``fitted``: the shortest duration on the rate grid
   at which a made piece stays inside the velocity and acceleration limits; ``approach``: from rest to a moving state at a given
-  sample, under a time law (the quintic through both states).
+  sample, under a time parameterization (the quintic through both states).
 
 Every tool path here holds one orientation: ``target_motion`` refuses a target that rotates (a ``PoseTrajectory`` may)
 rather than drop its rotation; ``LinearMotion`` and a fixed pose never rotate.
@@ -32,7 +32,7 @@ from ..cartesian import Unreachable, rotation_angle
 from ..moving import CannotCatch, LinearMotion, as_moving_target, is_target_record, target_from_record
 from ..segments import TOOL_TARGET, Piece
 from ..space import JointSpace, State
-from ..time_law import BoundaryState, TimeLaw
+from ..time_parameterization import BoundaryState, TimeParameterization
 
 TARGET_FIELDS = tuple(field.name for field in dataclasses.fields(LinearMotion))
 MAX_JOINT_STEP_RAD = 0.1  # WHY 0.1: cartesian.follow's absolute branch-flip threshold between samples
@@ -451,18 +451,19 @@ def hold_steps(q: Any, steps: int, rate_hz: float, label: str) -> Piece:
                  channels={TOOL_TARGET: np.full((count, 3), np.nan)})
 
 
-def approach(space: JointSpace, start: Any, arrive: State, steps: int, law: TimeLaw, *, label: str, wait_label: str, point: Any,
-             what: str) -> tuple[list[Piece], list[str]]:
+def approach(space: JointSpace, start: Any, arrive: State, steps: int, law: TimeParameterization, *, label: str, wait_label: str,
+             point: Any, what: str) -> tuple[list[Piece], list[str]]:
     """From rest at ``start`` to the moving state ``arrive`` exactly ``steps`` samples later, in joint space.
 
-    The leg is the time law's (the quintic through both states: ``TimeLaw.leg(..., end_state=)``). WHY wait at rest first when
+    The leg is the time parameterization's (the quintic through both states: ``TimeParameterization.leg(..., end_state=)``). WHY wait at rest first when
     it is shorter, rather than stretch it over the time there is: a quintic stretched to a moving end backs up first (its cubic
     term turns negative once the leg is longer than about 2.5 x distance / end speed). When the law's own leg is too long, the
     fallback is minimum-jerk over exactly the time there is, at the limits (noted); when not even that fits:
     ``CannotCatch("time_law_error")`` (bam_traj_gen's ``ruckig_error``: the intercept leg cannot be timed)."""
     if law.shape == "trapezoid":
         raise ValueError(f"{label}: a trapezoid is rest-to-rest; the approach ends moving with the target, so it takes "
-                         "TimeLaw.minimum_jerk (the quintic through both states) or a backend that serves boundary states")
+                         "TimeParameterization.minimum_jerk (the quintic through both states) or a backend that serves boundary "
+                         "states")
     rate = space.rate_hz
     if steps < 1:
         raise CannotCatch("time_law_error", f"{what}: the moving state is due at t = {steps / rate:.3f} s, leaving no time to approach it")
@@ -473,7 +474,7 @@ def approach(space: JointSpace, start: Any, arrive: State, steps: int, law: Time
     except ValueError:
         leg = None
     if leg is None or len(leg.t) - 1 > steps:
-        at_limits = TimeLaw.minimum_jerk(move_s=steps / rate)
+        at_limits = TimeParameterization.minimum_jerk(move_s=steps / rate)
         try:
             leg = at_limits.leg(start, arrive.q, space.limits, rate, label=label, end_state=end)
         except ValueError as error:
@@ -505,7 +506,8 @@ def approach(space: JointSpace, start: Any, arrive: State, steps: int, law: Time
 
 
 def meet(space: JointSpace, start: Any, moving: Any, first: int, last: int, *, rotation: np.ndarray, offset: Any,
-         time_law: TimeLaw, label: str, tolerance_m: float = 1e-4) -> tuple[list[Piece], list[str], ToolPath]:
+         time_parameterization: TimeParameterization, label: str, tolerance_m: float = 1e-4) -> tuple[list[Piece], list[str],
+                                                                                                      ToolPath]:
     """From rest at ``start``: the approach, then the tool on the target (plus a fixed ``offset``, base frame) from sample
     ``first`` to ``last``, velocity matched at ``first``. The pieces (the last is the synchronised one), notes, and its path."""
     rate = space.rate_hz
@@ -514,8 +516,9 @@ def meet(space: JointSpace, start: Any, moving: Any, first: int, last: int, *, r
     path = chase(moving, np.arange(first, last + 1) / rate, rotation, fixed_offset(offset))
     seed = solve(space, path.pose(0), start, what=f"{label}: the tool on the target at t = {t0:.3f} s", tolerance_m=tolerance_m)
     track = synced(space, path, seed, label=f"{label}: synchronised", tolerance_m=tolerance_m)
-    pieces, notes = approach(space, start, State(track.q[0], track.qd[0], track.qdd[0]), first, time_law, label=f"{label}: approach",
-                             wait_label=f"{label}: wait at the start", point=path.points[0], what=label)
+    pieces, notes = approach(space, start, State(track.q[0], track.qd[0], track.qdd[0]), first, time_parameterization,
+                             label=f"{label}: approach", wait_label=f"{label}: wait at the start", point=path.points[0],
+                             what=label)
     return [*pieces, track], notes, path
 
 
@@ -532,7 +535,7 @@ def solve(space: JointSpace, pose: np.ndarray, seed: Any, *, what: str, toleranc
     return solution
 
 
-def law_steps(space: JointSpace, law: TimeLaw, q0: Any, q1: Any) -> int:
+def law_steps(space: JointSpace, law: TimeParameterization, q0: Any, q1: Any) -> int:
     """The samples a rest-to-rest leg q0 -> q1 takes under ``law`` (a duration to start a fit from)."""
     if law.built_in:
         return math.ceil(law.leg_timing(np.asarray(q0, float), np.asarray(q1, float), space.limits).duration_s * space.rate_hz - 1e-9)

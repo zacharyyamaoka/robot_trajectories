@@ -27,7 +27,11 @@ from .registry import Catalog, Entry, KindInfo, catalog, kind, kinds
 from .segments import Band, Motion, Piece, UnsafeTrajectory, annotate, bands, chain, labels, notes, repeat, segment_info, split
 from .signals import constant_speed_chirp
 from .space import JointSpace, MissingRung, ReachSet, State, Status
-from .time_law import BoundaryState, LegTiming, TimeLaw, TimeLawBackend, register_time_law, time_laws
+from .time_parameterization import (BoundaryState, LegTiming, TimeParameterization, TimeParameterizationBackend,
+                                    register_time_parameterization, time_parameterizations)
+# WHY the old names too (Zach, 2026-11-23: a better name than "time law"): deprecated aliases, the same objects, silent, because
+# arm_motion_bench and 21 of its frozen dataset files use them; importing them also keeps ``rt.time_law`` the (old) module
+from .time_law import TimeLaw, TimeLawBackend, register_time_law, time_laws
 
 plugins.load()  # WHY last: a plugin module imports this package, which must be whole by then
 
@@ -36,6 +40,7 @@ globals().update({name: info.function for name, info in kinds().items()})
 
 __all__ = ["Band", "BoundaryState", "CannotCatch", "Catalog", "Entry", "JointSpace", "KindInfo", "LegTiming", "LinearMotion",
            "MissingRung", "Motion", "MovingTarget", "Piece", "ReachSet", "State", "Status", "SyncReport", "TargetWaypoint", "TimeLaw",
-           "TimeLawBackend", "Unreachable", "UnsafeTrajectory", "annotate", "as_moving_target", "bands", "calls", "catalog", "chain",
-           "constant_speed_chirp", "kind", "kinds", "labels", "notes", "plugins", "rebuild", "recipe", "register_time_law", "repeat",
-           "segment_info", "split", "summary", "synchronised", "time_laws", "trajectory_catalog", *kinds()]
+           "TimeLawBackend", "TimeParameterization", "TimeParameterizationBackend", "Unreachable", "UnsafeTrajectory", "annotate",
+           "as_moving_target", "bands", "calls", "catalog", "chain", "constant_speed_chirp", "kind", "kinds", "labels", "notes",
+           "plugins", "rebuild", "recipe", "register_time_law", "register_time_parameterization", "repeat", "segment_info",
+           "split", "summary", "synchronised", "time_laws", "time_parameterizations", "trajectory_catalog", *kinds()]

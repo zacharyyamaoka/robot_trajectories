@@ -17,9 +17,10 @@ import _runner
 import scenario
 from fixtures import lane_c, robots
 from kind_contract import check_kind
-from robot_trajectories import (JointSpace, bands, MissingRung, TimeLaw, Unreachable, approach_retreat, cartesian_a_to_b, cartesian_arc,
-                                cartesian_raster, chain, coverage_greedy_swings, input_shaped_move, kinds, labels, lissajous_multi_joint,
-                                notes, polynomial_move, segment_info, space_filling_pose_set, trapezoidal_velocity, via_point_spline)
+from robot_trajectories import (JointSpace, bands, MissingRung, TimeParameterization, Unreachable, approach_retreat,
+                                cartesian_a_to_b, cartesian_arc, cartesian_raster, chain, coverage_greedy_swings,
+                                input_shaped_move, kinds, labels, lissajous_multi_joint, notes, polynomial_move, segment_info,
+                                space_filling_pose_set, trapezoidal_velocity, via_point_spline)
 from robot_trajectories.kinds import _lane_c
 from robot_trajectories.segments import TOOL_TARGET
 
@@ -116,9 +117,10 @@ def test_polynomial_move_cubic_and_quintic_hit_their_states_and_hand_a_moving_en
             check_kind(move, space)
             assert abs(move.t[-1] - 1.5) <= 1e-9 or move.t[-1] > 1.5
             assert np.allclose(move.velocities[[0, -1]], 0, atol=1e-9)
-        # quintic: the minimum-jerk leg when rest to rest (the same positions as TimeLaw.minimum_jerk's)
-        leg = TimeLaw.minimum_jerk(move_s=1.5).leg(space.home, space.home + 0.5 * (space.room(space.home).high - space.home),
-                                                   space.limits, space.rate_hz)
+        # quintic: the minimum-jerk leg when rest to rest (the same positions as TimeParameterization.minimum_jerk's)
+        leg = TimeParameterization.minimum_jerk(move_s=1.5).leg(space.home,
+                                                                space.home + 0.5 * (space.room(space.home).high - space.home),
+                                                                space.limits, space.rate_hz)
         assert np.allclose(polynomial_move(space, order=5, duration_s=1.5).positions, leg.q, atol=1e-12)
     space = scenario.ur5e_space()
     cruise = 0.3 * np.ones(6)
@@ -176,7 +178,8 @@ def test_via_point_spline_passes_through_without_stopping():
     assert any("jerk" in note for note in notes(via_point_spline(space, vias))), "no note that the jerk is not limited"
     refused(lambda: via_point_spline(space, [np.zeros(6)]), "outside its limits")
     refused(lambda: via_point_spline(space, vias, interpolation="line"), "interpolation")
-    refused(lambda: via_point_spline(jerky, vias, time_law=TimeLaw.trapezoid(peak_speed_fraction=0.5)), "unlimited jerk")
+    refused(lambda: via_point_spline(jerky, vias, time_parameterization=TimeParameterization.trapezoid(peak_speed_fraction=0.5)),
+            "unlimited jerk")
     refused(lambda: via_point_spline(space, vias, blend_radius_m=0.05), "kinematics")
     metric = via_point_spline(ur5e(), vias, blend_radius_m=0.05)  # Pilz's way: the tool metres from the corner
     check_kind(metric, ur5e())
@@ -321,7 +324,7 @@ def test_input_shaped_move_leaves_no_vibration_in_the_mode_it_is_tuned_to():
     space = with_dynamics(pendulum())
     start = space.home
     target = start + 0.8 * (space.room(start).high - start)
-    law = TimeLaw.minimum_jerk(peak_speed_fraction=0.5)
+    law = TimeParameterization.minimum_jerk(peak_speed_fraction=0.5)
     plain = law.leg(start, target, space.limits, space.rate_hz)
     for shaper in ("ZV", "ZVD"):
         shaped = input_shaped_move(space, target, mode_hz=3.0, damping_ratio=0.05, shaper=shaper)

@@ -5,7 +5,7 @@ import numpy as np
 from .. import kernels as k
 from ..registry import LIMITS, kind
 from ..segments import Motion
-from ..time_law import TimeLaw
+from ..time_parameterization import TimeParameterization
 from . import _lane_b as b
 
 
@@ -13,8 +13,9 @@ from . import _lane_b as b
       catalog_id="weightless_float", command="effort", ends="anywhere",
       until="the last float has run (float_s, 5 s by default) or the drift passes the player's guard; each earlier float ends "
             "when float_s has run")
-def weightless_float(space, *, float_s=5.0, hold_s=1.0, poses=5, seed=11, time_law=TimeLaw.minimum_jerk(peak_speed_fraction=0.5),
-                     label="weightless float", start=None):
+def weightless_float(space, *, float_s=5.0, hold_s=1.0, poses=5, seed=11,
+                     time_parameterization=TimeParameterization.minimum_jerk(peak_speed_fraction=0.5), label="weightless float",
+                     start=None):
     """At each of ``poses`` admitted, holdable configurations spread over the room: hold under the position loop for ``hold_s``,
     then drop kp and kd to zero and keep sending the model's gravity torque for ``float_s``. The drift over the float is how well
     gravity is modelled ("it feels weightless", made measurable).
@@ -31,8 +32,8 @@ def weightless_float(space, *, float_s=5.0, hold_s=1.0, poses=5, seed=11, time_l
     samples = int(round(float_s * space.rate_hz)) + 1
     for index, q in enumerate(stations, start=1):
         if not np.allclose(here, q, atol=1e-12):
-            pieces.append(time_law.leg(here, q, space.limits, space.rate_hz, label=f"{label}: move to station {index}",
-                                           dynamics=space.dynamics))
+            pieces.append(time_parameterization.leg(here, q, space.limits, space.rate_hz,
+                                                    label=f"{label}: move to station {index}", dynamics=space.dynamics))
         pieces.append(k.hold(q, hold_s, space.rate_hz, label=f"{label}: station {index} held"))
         swing = b.predict_until(space, q, lambda i, position, velocity: b.hold_effort(space, position), samples)
         pieces.append(b.Piece(np.arange(len(swing[0])) / space.rate_hz, swing[0], swing[1], swing[2],

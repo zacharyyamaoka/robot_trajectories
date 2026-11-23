@@ -5,7 +5,7 @@ import math
 import numpy as np
 
 from ..registry import LIMITS, kind
-from ..time_law import TimeLaw
+from ..time_parameterization import TimeParameterization
 from ._lane_d import line_clear, pose_of, pose_set, try_solve  # noqa: F401  (line_clear: the legs are routed by pose_set)
 
 # WHY from memory, not re-read (ISO 9283 is paywalled; the catalog row says the same): the pose test is five poses on the
@@ -91,7 +91,8 @@ def iso9283_pose_cube(space, *, cube_edge_m=0.2, cycles=30, speed_fraction=1.0, 
     poses, _ = cube_poses(used, cube_edge_m, azimuth_rad)
     stations = [solutions[index] for _ in range(cycles) for index in range(5)]
     points = [poses[index] for _ in range(cycles) for index in range(5)]
-    law = TimeLaw.minimum_jerk(peak_speed_fraction=speed_fraction)
-    return pose_set(space, label, start, stations, points=points, dwell_s=dwell_s, time_law=law, room=room, via=start,
+    law = TimeParameterization.minimum_jerk(peak_speed_fraction=speed_fraction)
+    return pose_set(space, label, start, stations, points=points, dwell_s=dwell_s, time_parameterization=law, room=room,
+                    via=start,
                     entry={"cube": {"centre_m": [float(v) for v in used], "edge_m": float(cube_edge_m), "azimuth_rad": float(azimuth_rad)},
                            "poses": ["P1", "P2", "P3", "P4", "P5"] * cycles, "cycles": int(cycles)})

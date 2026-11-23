@@ -10,7 +10,7 @@ tested. The contract every kind obeys is [PEP 0002 §4](peps/0002-signal-library
 | **B** | quasi-static + hold + stress, and every torque / event-ended kind | 15 | nothing |
 | **C** | point-to-point + coverage (incl. CIRC and approach/retreat of the 6-DOF family) | 11 | nothing |
 | **D** | standard tests + calibration + task cycles | 9 | C's `cartesian_arc` for `circular_test` / `iso9283_path` (or its own arc helper) |
-| **E** | time-law plugin packages under `plugins/` (Ruckig, Ruckig Pro, TOPP-RA) and the two rows they serve | 2 | nothing |
+| **E** | time-parameterization plugin packages under `plugins/` (Ruckig, Ruckig Pro, TOPP-RA) and the two rows they serve | 2 | nothing |
 | **F** | moving-target (synchronised) kinds | 3 | nothing (the contract is `robot_trajectories.moving`) |
 
 ## Rules of the road (every lane)
@@ -22,7 +22,7 @@ tested. The contract every kind obeys is [PEP 0002 §4](peps/0002-signal-library
 - `tests/fixtures/lane_<x>.py`: that lane's own fixtures (numpy only; stand-ins labelled as such);
 - lane E only: `plugins/<package>/...` (its own `pyproject.toml`, source, tests).
 
-**A lane must not edit** `registry.py`, `segments.py`, `space.py`, `time_law.py`, `cartesian.py`, `moving.py`, `plugins.py`,
+**A lane must not edit** `registry.py`, `segments.py`, `space.py`, `time_parameterization.py`, `cartesian.py`, `moving.py`, `plugins.py`,
 `recipe.py`, `kernels.py` (byte-identical to the round's), `trajectory_catalog/` (every row below already exists),
 `tests/fixtures/robots.py`, `tests/kind_contract.py`, or any existing test. **If a kind needs a core change, stop and report
 it**: a change to a contract other lanes import is a barrier, landed first and alone by the dispatcher.
@@ -39,7 +39,7 @@ it**: a change to a contract other lanes import is a barrier, landed first and a
 **Three output shapes that are not plain position trajectories, and how each still returns a JointTrajectory:**
 
 1. **Pose sets** (`output="pose_set"`: stations to visit, dwell and measure at). Return the stations joined by
-   `TimeLaw` legs (`time_law=` argument, default minimum-jerk) with a dwell piece at each, labelled `"<label>: station k"`;
+   `TimeParameterization` legs (`time_parameterization=` argument, default minimum-jerk) with a dwell piece at each, labelled `"<label>: station k"`;
    put the stations' configurations in the segment entry through `Motion(pieces, notes, entry={"stations": [[...], ...]})`.
    With kinematics, a station given as a tool pose is solved with `cartesian.solve_points`.
 2. **Torque profiles** (`output="torque_profile"`, `space="torque"`). Declare `command="effort"` and the needs
@@ -53,7 +53,7 @@ it**: a change to a contract other lanes import is a barrier, landed first and a
    expected stop"`), so a player stops on the event. Torque-commanded ones are also `command="effort"`.
 
 **Moving boundaries** (a kind that hands a moving state on, lane F mainly): declare `ends="moving"` / `starts="moving"`; a
-moving-start body receives `start` as a `State(q, qd, qdd)`. `TimeLaw.minimum_jerk(...).leg(q0, q1, ..., start_state=,
+moving-start body receives `start` as a `State(q, qd, qdd)`. `TimeParameterization.minimum_jerk(...).leg(q0, q1, ..., start_state=,
 end_state=)` is the quintic through both states. `chain` refuses a moving end joined to anything that does not start in
 that exact state.
 
@@ -61,7 +61,7 @@ that exact state.
 
 | motion | kind | status |
 |---|---|---|
-| PTP (joint move, synchronised trapezoid) | `move` / `joint_waypoints` with `TimeLaw.trapezoid(...)`; lane C's `trapezoidal_velocity` | built; the named row is lane C |
+| PTP (joint move, synchronised trapezoid) | `move` / `joint_waypoints` with `TimeParameterization.trapezoid(...)`; lane C's `trapezoidal_velocity` | built; the named row is lane C |
 | LIN (straight tool line) | `cartesian_path` | built |
 | CIRC (tool arc by centre or interim point) | `cartesian_arc` | lane C |
 | approach / retreat along the tool axis | `approach_retreat` | lane C |
@@ -122,8 +122,8 @@ Every Cartesian test also holds the output to its commanded tool points by forwa
 
 | row (priority) | function → file | rung | robots | notes |
 |---|---|---|---|---|
-| `trapezoidal_velocity` (later) | `trapezoidal_velocity` → `kinds/trapezoidal_velocity.py` | none | 1D pendulum, 2D, 6D | a move under `TimeLaw.trapezoid` (Pilz PTP): built in, a few lines |
-| `polynomial_move` (later) | `polynomial_move` → `kinds/polynomial_move.py` | none | 1D, 2D, 6D | cubic or quintic between states; moving ends via `TimeLaw.minimum_jerk(...).leg(..., start_state=, end_state=)` |
+| `trapezoidal_velocity` (later) | `trapezoidal_velocity` → `kinds/trapezoidal_velocity.py` | none | 1D pendulum, 2D, 6D | a move under `TimeParameterization.trapezoid` (Pilz PTP): built in, a few lines |
+| `polynomial_move` (later) | `polynomial_move` → `kinds/polynomial_move.py` | none | 1D, 2D, 6D | cubic or quintic between states; moving ends via `TimeParameterization.minimum_jerk(...).leg(..., start_state=, end_state=)` |
 | `via_point_spline` (next) | `via_point_spline` → `kinds/via_point_spline.py` | jerk limits (when stated) | 2D five-bar, 6D UR5e | through via points without stopping; the blended Pilz sequence |
 | `cartesian_arc` (next) | `cartesian_arc` → `kinds/cartesian_arc.py` | kinematics | five-bar (planar arc), UR5e | Pilz CIRC: a path `s -> pose` given to `cartesian.follow` (the arc is the geometry; IK every step) |
 | `approach_retreat` (next) | `approach_retreat` → `kinds/approach_retreat.py` | kinematics | five-bar, UR5e | a `cartesian.line` along the tool's own z (or a given axis), out and back |
@@ -148,30 +148,30 @@ Every Cartesian test also holds the output to its commanded tool points by forwa
 | `adept_cycle` (later) | `adept_cycle` → `kinds/adept_cycle.py` | kinematics | five-bar (the plane), UR5e | up / across / down as `cartesian_path` lines, as fast as the limits allow |
 | `touch_down_contact` (later) | `touch_down_contact` → `kinds/touch_down_contact.py` | kinematics | five-bar, UR5e | descend, the last stretch at a set tool speed aiming below the surface, dwell, lift |
 
-## Lane E: time-law plugin packages (2 rows + 3 packages)
+## Lane E: time-parameterization plugin packages (2 rows + 3 packages)
 
 Each package lives in `plugins/<package>/` with its own `pyproject.toml`, registers through the entry-point group
-`robot_trajectories.time_laws`, depends on `robot-trajectories` and the library it wraps, and has tests that hold its
-backend to the `TimeLawBackend` protocol (time_law.py) on the pendulum, the five-bar and the UR5e: starts and ends at the
+`robot_trajectories.time_parameterizations`, depends on `robot-trajectories` and the library it wraps, and has tests that hold its
+backend to the `TimeParameterizationBackend` protocol (time_parameterization.py) on the pendulum, the five-bar and the UR5e: starts and ends at the
 path's ends in the given states, sampled at the rate from t = 0, inside the limits it was handed, `path_progress` when it
 follows a dense path, and `can_service` refusals by name. Install for the tests with
 `uv pip install -e plugins/<package>` into a separate environment; the core venv stays numpy + robot_msgs.
 
 ```toml
-[project.entry-points."robot_trajectories.time_laws"]
+[project.entry-points."robot_trajectories.time_parameterizations"]
 ruckig = "robot_trajectories_ruckig:RuckigBackend"
 ```
 
 | package | registers | what | the rule it must keep |
 |---|---|---|---|
 | `plugins/robot_trajectories_ruckig/` | `ruckig` | Ruckig **Community** (PyPI `ruckig`): state-to-state legs, boundary states (target velocity / acceleration), jerk from `max_jerk` | **never intermediate waypoints**: Community sends them to Ruckig's cloud. `can_service` refuses more than two path points and names the Pro package |
-| `plugins/robot_trajectories_ruckig_pro/` | `ruckig` (a drop-in, same name) | Ruckig **Pro**, the local build: intermediate waypoints (`WaypointsCalculator`), position limits | on load, verify provenance as bam_ws `bam_traj_gen/ruckig_backend.require_local_ruckig_pro` does (the `ruckig-pro` distribution at the pinned version, from the workspace checkout's `direct_url.json`, the Pro-only API present, no cloud markers in the native module) and refuse to register otherwise; never installed beside Community (`time_law.backend` refuses two providers of one name) |
+| `plugins/robot_trajectories_ruckig_pro/` | `ruckig` (a drop-in, same name) | Ruckig **Pro**, the local build: intermediate waypoints (`WaypointsCalculator`), position limits | on load, verify provenance as bam_ws `bam_traj_gen/ruckig_backend.require_local_ruckig_pro` does (the `ruckig-pro` distribution at the pinned version, from the workspace checkout's `direct_url.json`, the Pro-only API present, no cloud markers in the native module) and refuse to register otherwise; never installed beside Community (`time_parameterization.backend` refuses two providers of one name) |
 | `plugins/robot_trajectories_toppra/` | `toppra` | TOPP-RA: time-optimal along a dense joint path; boundary path speeds; torque-limited mode (`effort_fraction`) | the torque mode reads the space's dynamics through the seam's `dynamics=` (landed 2026-11-18, PEP 0002 §6): `needs(law)` names `dynamics_model` and `torque_limits`, the model's torque stays within `max_effort` at every sample |
 
 | row | function → file | rung | robots | notes |
 |---|---|---|---|---|
-| `jerk_limited_scurve` (next) | `jerk_limited_scurve` → `kinds/jerk_limited_scurve.py` | jerk limits + the `ruckig` plugin | 1D, 2D, 6D | build `TimeLaw("ruckig", ...)` inside the body (a default argument would be evaluated at import, before plugins load); without the plugin the call is refused naming the group |
-| `time_optimal_path` (later) | `time_optimal_path` → `kinds/time_optimal_path.py` | the `toppra` plugin | 1D, 2D, 6D | `TimeLaw("toppra", ...).along(path, ...)` |
+| `jerk_limited_scurve` (next) | `jerk_limited_scurve` → `kinds/jerk_limited_scurve.py` | jerk limits + the `ruckig` plugin | 1D, 2D, 6D | build `TimeParameterization("ruckig", ...)` inside the body (a default argument would be evaluated at import, before plugins load); without the plugin the call is refused naming the group |
+| `time_optimal_path` (later) | `time_optimal_path` → `kinds/time_optimal_path.py` | the `toppra` plugin | 1D, 2D, 6D | `TimeParameterization("toppra", ...).along(path, ...)` |
 
 ## Lane F: moving-target (synchronised) kinds (3)
 

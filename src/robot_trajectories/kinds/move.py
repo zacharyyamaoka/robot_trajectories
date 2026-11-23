@@ -3,13 +3,13 @@ from __future__ import annotations
 import numpy as np
 
 from ..registry import kind
-from ..time_law import TimeLaw, legs_through
+from ..time_parameterization import TimeParameterization, legs_through
 
 
 @kind(use_cases=("tracking_eval", "stop_accuracy", "pid_tuning", "demo"), catalog_id="minimum_jerk_move")
-def move(space, joint=None, *, targets_fraction=(0.5, -0.5), time_law=TimeLaw.minimum_jerk(move_s=1.0), dwell_s=0.3,
-         back_to_start=True, label="move", start=None):
-    """Rest-to-rest moves through waypoints given as fractions of the room around the start, each leg timed by ``time_law``
+def move(space, joint=None, *, targets_fraction=(0.5, -0.5), time_parameterization=TimeParameterization.minimum_jerk(move_s=1.0),
+         dwell_s=0.3, back_to_start=True, label="move", start=None):
+    """Rest-to-rest moves through waypoints given as fractions of the room around the start, each leg timed by ``time_parameterization``
     (minimum-jerk by default: x = x0 + d (10 s^3 - 15 s^4 + 6 s^5), peaking at 1.875 d / T), with a dwell at each, then back
     to the start: the house leg of every waypoints tape (the rack runner's ``q:move_s:dwell_s;...``).
 
@@ -33,4 +33,5 @@ def move(space, joint=None, *, targets_fraction=(0.5, -0.5), time_law=TimeLaw.mi
         rows.append(row)
     if back_to_start:
         rows.append(start.copy())
-    return legs_through(start, rows, time_law, space.limits, space.rate_hz, dwell_s=dwell_s, label=label, dynamics=space.dynamics)
+    return legs_through(start, rows, time_parameterization, space.limits, space.rate_hz, dwell_s=dwell_s, label=label,
+                        dynamics=space.dynamics)
