@@ -8,8 +8,21 @@ name = "robot-trajectories"
 version = "0.1.0"
 description = "A signal library for robot motion: plain functions of a JointSpace (joint limits; kinematics, dynamics and collision injected) that return robot_msgs JointTrajectories inside the limits."
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [{ name = "Zach Yamaoka" }]
 requires-python = ">=3.11"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering",
+]
 # WHY robot_msgs + numpy only (the leaf rule, the 2026-11-18 round's contract; Zach's "dependency-free runtime cores"):
 # a RobotDescription, a ReachMap, kinematics, a dynamics model or a collision checker enter by shape (joint_limits(),
 # joint_solutions / valid_mask, forward / inverse, torque, in_collision), never by import, so sim2real, apps and rigs can all
@@ -19,6 +32,10 @@ dependencies = ["robot-msgs>=0.3.0", "numpy>=1.26"]
 
 [project.optional-dependencies]
 test = ["pytest>=8"]
+
+[project.urls]
+Homepage = "https://github.com/zacharyyamaoka/robot_trajectories"
+Repository = "https://github.com/zacharyyamaoka/robot_trajectories"
 
 [tool.uv.sources]
 # WHY absolute: robot_models and robot_metrics name it the same way (a consumer's lock took a relative source over, 2026-11-12).

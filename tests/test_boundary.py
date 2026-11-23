@@ -117,7 +117,7 @@ def test_core_imports_in_an_isolated_environment():
     # WHY clear VIRTUAL_ENV (bam_ws CLAUDE.md): with it set, uv may reuse the active env and both red and green would lie.
     env = {key: value for key, value in os.environ.items() if key != "VIRTUAL_ENV"}
     env.update(UV_CONCURRENT_BUILDS="2", UV_CONCURRENT_INSTALLS="2", UV_CONCURRENT_DOWNLOADS="2")
-    done = subprocess.run(["uv", "run", "--isolated", "--no-dev", "--project", str(ROOT), "python", "-c", _import_all()],
+    done = subprocess.run(["uv", "run", "--isolated", "--no-sources", "--project", str(ROOT), "python", "-c", _import_all()],
                           cwd=ROOT, env=env, capture_output=True, text=True, timeout=600)
     assert done.returncode == 0, done.stderr[-2000:]
     assert "imports clean" in done.stdout, done.stdout[-2000:]
