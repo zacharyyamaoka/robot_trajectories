@@ -320,6 +320,32 @@ class WaypointTrajectoryGenerator:
 
     # ------------------------------------------------------------------ one leg, and a path
 
+    def __call__(self, points: np.ndarray, limits: JointLimits, rate_hz: float, *, start_state: BoundaryState | None = None,
+                 end_state: BoundaryState | None = None, dynamics: Any = None) -> JointTrajectory:
+        """Points (M, J) and joint limits in, a JointTrajectory out. Two points are one leg (``leg``, boundary states allowed);
+        more are a path timed rest to rest (``along``, with each sample's ``path_progress`` in points, as the built-in backend
+        records it).
+
+        WHY callable (Zach, 2026-11-23: "All TrajectoryGenerators output Trajectories"): it makes every
+        WaypointTrajectoryGenerator a ``TrajectoryGenerator`` in the literal isinstance sense, not only in prose."""
+        points = np.asarray(points, float)
+        if points.ndim != 2 or len(points) < 2:
+            raise ValueError(f"points are (M, J) with M >= 2, got shape {points.shape}")
+        joint_limits = _joint_limits(limits)
+        if len(points) == 2:
+            arrays = self.leg(points[0], points[1], limits, rate_hz, start_state=start_state, end_state=end_state,
+                              dynamics=dynamics)
+            progress = None
+        else:
+            if not (_at_rest(start_state) and _at_rest(end_state)):
+                raise ValueError("a path of more than two points is timed rest to rest; hand boundary states to a two-point leg")
+            timed = self.along(points, limits, rate_hz, dynamics=dynamics)
+            arrays = timed.arrays
+            progress = None if timed.progress is None else timed.progress * (len(points) - 1)
+        channels = {} if progress is None else {"path_progress": progress}
+        return JointTrajectory(t=arrays.t, joint_names=tuple(joint_limits.joint_names), positions=arrays.q,
+                               velocities=arrays.qd, accelerations=arrays.qdd, limits=joint_limits, channels=channels)
+
     def leg(self, q0: np.ndarray, q1: np.ndarray, limits: Any, rate_hz: float, *, label: str = "move",
             start_state: BoundaryState | None = None, end_state: BoundaryState | None = None, dynamics: Any = None) -> k.Arrays:
         """One leg q0 -> q1 under this law, at rest at both ends unless ``start_state`` / ``end_state`` say otherwise.

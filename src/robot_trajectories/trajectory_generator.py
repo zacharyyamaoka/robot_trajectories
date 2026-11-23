@@ -8,8 +8,9 @@ commonality". So:
   ``chirp``, ``pick_and_place``, ``speed_ladder``, ...) is one, and so is a kind bound to its space
   (``functools.partial(chirp, space, joint="can11")``);
 - a **WaypointTrajectoryGenerator** (``waypoint_trajectory_generator.py``) is the special one the kinds hand their legs' timing
-  to: points and joint limits in, a JointTrajectory out (minimum-jerk, trapezoid, Ruckig, Ruckig Pro, TOPP-RA). Its backend's
-  ``time_parameterize(points, limits, rate_hz, generator)`` is that call; inside a kind it is ``leg`` / ``along``.
+  to: points and joint limits in, a JointTrajectory out (minimum-jerk, trapezoid, Ruckig, Ruckig Pro, TOPP-RA). Calling one,
+  ``generator(points, limits, rate_hz)``, makes that trajectory, so it is a TrajectoryGenerator in the isinstance sense too;
+  inside a kind the same timing runs as ``leg`` / ``along``, and a plugin serves it through its backend's ``time_parameterize``.
 
 The stage they make up is still *trajectory generation*.
 """

@@ -222,6 +222,28 @@ def _discover(*points: _Point) -> list[str]:
         return plugins.load(refresh=True)
 
 
+def test_a_waypoint_trajectory_generator_is_a_trajectory_generator():
+    """Zach, 2026-11-23: "All TrajectoryGenerators output Trajectories": a WaypointTrajectoryGenerator is one, literally."""
+    limits = robots.PENDULUM_LIMITS
+    for generator in (rt.WaypointTrajectoryGenerator.minimum_jerk(peak_speed_fraction=0.5),
+                      rt.WaypointTrajectoryGenerator.trapezoid(peak_speed_fraction=0.5)):
+        assert isinstance(generator, rt.TrajectoryGenerator), generator
+        for points in (np.array([[-0.2], [0.3]]), np.array([[-0.2], [0.1], [0.3]])):
+            out = generator(points, limits, 100.0)
+            assert isinstance(out, JointTrajectory) and isinstance(out, Trajectory), type(out)
+            assert out.joint_names == tuple(limits.joint_names)
+            assert np.allclose(out.positions[0], points[0]) and np.allclose(out.positions[-1], points[-1]), (generator, points)
+            assert np.allclose(out.velocities[[0, -1]], 0.0), (generator, points)
+            assert np.allclose(out.t, np.arange(len(out.t)) / 100.0)
+            assert ("path_progress" in out.channels) == (len(points) > 2), out.channels
+    try:
+        rt.WaypointTrajectoryGenerator.minimum_jerk(peak_speed_fraction=1.0)(np.array([0.0, 1.0]), limits, 100.0)
+    except ValueError as error:
+        assert "(M, J)" in str(error), error
+    else:
+        raise AssertionError("a 1-D point list was accepted")
+
+
 def test_the_groups_are_read_newest_first():
     assert plugins.WAYPOINT_TRAJECTORY_GENERATOR_GROUPS == (NEW_GROUP, MIDDLE_GROUP, OLD_GROUP)
     assert plugins.LEGACY_TIME_PARAMETERIZATION_GROUP == MIDDLE_GROUP and plugins.LEGACY_TIME_LAW_GROUP == OLD_GROUP
