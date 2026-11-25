@@ -5,6 +5,14 @@ schema = "robot-sdk-declaration/1"
 role = "library"
 layer = "leaf"
 one_line = "Trajectory kinds from limits and tasks, one JointTrajectory out"
+summary = "A signal library for robot motion. Every trajectory kind is a `TrajectoryGenerator`: a plain function `f(JointSpace, numbers/points/poses) → JointTrajectory`, inside the limits and at rest at both ends. ~80 kinds: moves, waypoints (joint and Cartesian), random waypoints, pick and place, chirps, multisines, PRBS, step trains, PID tuning, friction ID, ISO 9283 tests, workspace sweeps, moving targets. `chain` / `split` to compose. The legs inside a kind are timed by a `WaypointTrajectoryGenerator` (points + joint limits in, a JointTrajectory out: minimum_jerk, trapezoid, ruckig, ruckig_pro, toppra as plugins), passed as `waypoint_generator=`. The robot (limits, FK/IK, dynamics, collision) is injected via `JointSpace`."
+use_when = "Generating any motion: test trajectories, excitation for system ID, pick-and-place paths, tuning signals, benchmarks."
+
+# Where to read more. github and pypi are required; the rest are what this package has.
+[links]
+github = "https://github.com/zacharyyamaoka/robot_trajectories"
+pypi = "https://pypi.org/project/robot-trajectories/"
+docs = "https://github.com/zacharyyamaoka/robot_trajectories/tree/main/docs/peps"
 
 [[consumes]]
 type = "robot_msgs.trajectory.JointLimits"
