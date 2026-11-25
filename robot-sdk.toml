@@ -1,0 +1,50 @@
+# robot-sdk declaration: the shared types this package's public API takes (consumes) and gives (produces),
+# each with the symbols that are the contract. Checked against the code by robot_sdk's
+# `python -m tools.sdk_graph check` (docs/graph-schema.md in github.com/zacharyyamaoka/robot_sdk).
+schema = "robot-sdk-declaration/1"
+role = "library"
+layer = "leaf"
+one_line = "Trajectory kinds from limits and tasks, one JointTrajectory out"
+
+[[consumes]]
+type = "robot_msgs.trajectory.JointLimits"
+symbols = [
+  "robot_trajectories.space.JointSpace.from_limits",
+  "robot_trajectories.waypoint_trajectory_generator.WaypointTrajectoryGenerator.__call__",
+  "robot_trajectories.kernels.to_trajectory",
+]
+
+[[produces]]
+type = "robot_msgs.trajectory.JointLimits"
+symbols = [
+  "robot_trajectories.space.limits_from_json",
+]
+
+[[consumes]]
+type = "robot_msgs.trajectory.JointTrajectory"
+symbols = [
+  "robot_trajectories.segments.chain",
+  "robot_trajectories.segments.split",
+  "robot_trajectories.recipe.rebuild",
+]
+
+[[produces]]
+type = "robot_msgs.trajectory.JointTrajectory"
+symbols = [
+  "robot_trajectories.kernels.to_trajectory",
+  "robot_trajectories.registry.kind",
+  "robot_trajectories.recipe.rebuild",
+  "robot_trajectories.waypoint_trajectory_generator.WaypointTrajectoryGenerator.__call__",
+]
+
+[[produces]]
+type = "robot_msgs.trajectory.PoseTrajectory"
+symbols = [
+  "robot_trajectories.moving.target_from_record",
+]
+
+[[consumes]]
+type = "robot_msgs.trajectory.Trajectory"
+symbols = [
+  "robot_trajectories.trajectory_generator.TrajectoryGenerator.__call__",
+]
