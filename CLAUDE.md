@@ -71,5 +71,8 @@ still works, and what the kinds return is a Trajectory). Don't edit a green test
 
 - At most 2 worker processes, pinned `taskset -c 2-5,16,17`; never CPUs 22-23 (the fdcanusb IRQ). Never touch
   /dev/ttyACM*, CAN, cameras or moteus.
-- **Local git only: no remote, never push.** Making it public (a GitHub repo, a package release) is Zach's call.
+- **Public on GitHub** (github.com/zacharyyamaoka/robot_trajectories; `main` tracks `origin`). Not on PyPI yet: a package
+  release is Zach's call.
+- Landing page: `website/build_site.py` (every card a real call, plotted; its docstring has the one-line build + publish)
+  then `website/publish_pages.py` (gh-pages). Live: https://zacharyyamaoka.github.io/robot_trajectories/
 - Outputs (tapes, scratch) go in `outputs/` (gitignored).

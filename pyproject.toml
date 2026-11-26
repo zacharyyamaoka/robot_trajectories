@@ -38,6 +38,7 @@ test = ["pytest>=8"]
 [project.urls]
 Homepage = "https://github.com/zacharyyamaoka/robot_trajectories"
 Repository = "https://github.com/zacharyyamaoka/robot_trajectories"
+Documentation = "https://zacharyyamaoka.github.io/robot_trajectories/"
 
 [tool.uv.sources]
 # WHY absolute: robot_models and robot_metrics name it the same way (a consumer's lock took a relative source over, 2026-11-12).

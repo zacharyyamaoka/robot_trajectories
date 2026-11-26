@@ -5,7 +5,10 @@ numbers, points or poses (the task), and get back one robot_msgs `JointTrajector
 carrying the call that made it. Trajectories concatenate (`chain`), cut back into rest-to-rest pieces (`split`) and rebuild
 from their own recipe, sample for sample. It is a leaf: numpy and robot_msgs at runtime, nothing else.
 
-**v0.1.0, local only.** Zach picked the round's V1 signal library on 2026-11-18 ("Its pure its functional it feels
+**Landing page: <https://zacharyyamaoka.github.io/robot_trajectories/>**. It has the quick start run for real, the API in one
+table, and a catalog card for every kind with a plot of its joint positions (in degrees), built by `website/build_site.py`.
+
+**v0.1.0, public on GitHub, not on PyPI yet.** Zach picked the round's V1 signal library on 2026-11-18 ("Its pure its functional it feels
 reusable... the type is the API"); this is that, with v6's motion kept bit for bit. Decision record:
 [docs/peps/0002-signal-library.md](docs/peps/0002-signal-library.md).
 
